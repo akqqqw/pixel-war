@@ -85,7 +85,9 @@ export function repaintOwnerLayer(world: WorldData, state: GameState, layer: Own
     data[offset] = color.r;
     data[offset + 1] = color.g;
     data[offset + 2] = color.b;
-    data[offset + 3] = water[index] ? 46 : 108;
+    // Land carries a strong political colour (the terrain still shows through),
+    // water only gets a faint wash so the coastline stays readable.
+    data[offset + 3] = water[index] ? 40 : 200;
   }
   layer.ctx.putImageData(image, 0, 0);
   layer.texture.refresh();
