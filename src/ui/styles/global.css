@@ -647,6 +647,11 @@ p {
   color: var(--muted);
 }
 
+.selection__push {
+  color: var(--green);
+  font-weight: 700;
+}
+
 .selection__actions {
   display: flex;
   flex-wrap: wrap;

@@ -102,7 +102,7 @@ src/data      — описания государств и имена регио
 src/store     — Zustand: состояние экранов, игровой цикл, действия UI
 src/services  — IndexedDB-сохранения
 src/ui        — React: одноэкранный HUD, нижняя панель, диалоги, меню
-src/tests     — Vitest: 7 файлов, 55 тестов
+src/tests     — Vitest: 8 файлов, 60 тестов
 ```
 
 Правила: логика не импортирует Phaser и React; карта рисуется процедурными пиксельными
@@ -113,7 +113,7 @@ src/tests     — Vitest: 7 файлов, 55 тестов
 
 ```bash
 npm run typecheck  # строгий TypeScript, noUnusedLocals
-npm test           # 55 тестов: генерация мира, экономика и найм, постройки, фронт, симуляция, сейвы, UI
+npm test           # 60 тестов: мир, экономика и найм, постройки, фронт, симуляция, сейвы, UI, стор
 npm run build      # production-сборка
 ```
 

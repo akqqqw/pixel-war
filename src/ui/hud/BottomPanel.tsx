@@ -9,7 +9,7 @@ import {
   type BuildingTab,
 } from '@/core/buildings/buildings';
 import { useGameStore } from '@/store/gameStore';
-import { territoryEffects } from '@/core/sim/effects';
+import { attackStrength, territoryEffects } from '@/core/sim/effects';
 import { canBuild, maxRecruit } from '@/core/sim/actions';
 import { formatPopulation, formatSigned } from '@/ui/helpers/format';
 import {
@@ -49,6 +49,13 @@ export function BottomPanel() {
 
   if (!game || !country) return null;
 
+  // How hard the strongest own army next to the selected region can push.
+  const borderAttack =
+    staticTerritory && !isOwn
+      ? staticTerritory.neighbors
+          .filter((id) => game.territories[id]?.owner === country.id)
+          .reduce((best, id) => Math.max(best, attackStrength(game, id)), 0)
+      : 0;
   const recruitAmount = Math.min(RECRUIT_STEP, selectedId ? maxRecruit(game, selectedId) : 0);
   const recruitCost = Math.round(recruitAmount * BALANCE.recruitCost);
   const canRecruit =
@@ -127,6 +134,11 @@ export function BottomPanel() {
                 <span>Доход {formatSigned(territory.income)} ₽/ч</span>
                 <span>Оборона {territoryDefense(game, staticTerritory.id)}</span>
                 {effects && effects.buildings > 0 ? <span>Зданий {effects.buildings}</span> : null}
+                {!isOwn && borderAttack > 0 ? (
+                  <span className={borderAttack > territoryDefense(game, staticTerritory.id) ? 'selection__push' : ''}>
+                    Ваша граница {Math.round(borderAttack)}
+                  </span>
+                ) : null}
               </div>
               <div className="selection__actions">
                 {isOwn ? (
