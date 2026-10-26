@@ -1,4 +1,4 @@
-import type { CountryId, Resources } from '@/core/types';
+import type { CountryId } from '@/core/types';
 import type { TerrainCode } from '@/core/world/terrain';
 import { TERRAIN, TERRAIN_INFO, isLand } from '@/core/world/terrain';
 
@@ -28,8 +28,6 @@ export interface TerritoryStatic {
   dominantTerrain: TerrainCode;
   terrainMix: Partial<Record<TerrainCode, number>>;
   population: number;
-  /** Produced each game tick at economy level 1. */
-  baseYields: Resources;
   isCoastal: boolean;
   hasRiver: boolean;
   initialOwner: CountryId | null;

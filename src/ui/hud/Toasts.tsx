@@ -1,26 +1,29 @@
 import { useEffect } from 'react';
 import { useGameStore } from '@/store/gameStore';
 
-export function EventToasts() {
+/** Short messages: build results, failed actions, captured territories. */
+export function Toasts() {
   const notices = useGameStore((state) => state.notices);
   const dismiss = useGameStore((state) => state.dismissNotice);
 
   useEffect(() => {
-    const timers = notices.map((notice) => window.setTimeout(() => dismiss(notice.id), 7000));
+    if (notices.length === 0) return undefined;
+    const timers = notices.map((notice) => window.setTimeout(() => dismiss(notice.id), 3200));
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [notices, dismiss]);
 
+  if (notices.length === 0) return null;
   return (
     <div className="toasts">
       {notices.map((notice) => (
-        <div
+        <button
           key={notice.id}
+          type="button"
           className={`toast toast--${notice.kind}`}
           onClick={() => dismiss(notice.id)}
-          role="status"
         >
           {notice.text}
-        </div>
+        </button>
       ))}
     </div>
   );

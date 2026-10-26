@@ -1,72 +1,77 @@
 import { useGameStore } from '@/store/gameStore';
-import { useGameSnapshot, ownedTerritories, playerCountry } from '@/ui/helpers/game';
-import { ResourceChip } from '@/ui/components/ResourceChip';
-import { formatGameClock, formatGameDateShort } from '@/core/time/gameDate';
-import { useUiStore } from '@/ui/state/uiStore';
+import { formatGameDate } from '@/core/time/gameDate';
+import { formatMoney, formatPopulation, formatSigned } from '@/ui/helpers/format';
+import { playerCountry, playerTotals } from '@/ui/helpers/game';
+import type { GameSpeed } from '@/core/state/types';
+
+const SPEEDS: { value: GameSpeed; label: string; title: string }[] = [
+  { value: 0, label: '❚❚', title: 'Пауза' },
+  { value: 1, label: '×1', title: 'Обычная скорость' },
+  { value: 2, label: '×2', title: 'Ускорение ×2' },
+  { value: 4, label: '×4', title: 'Ускорение ×4' },
+];
 
 interface TopBarProps {
-  onToggleLeft: () => void;
-  onToggleRight: () => void;
+  onMenu: () => void;
 }
 
-export function TopBar({ onToggleLeft, onToggleRight }: TopBarProps) {
-  const game = useGameSnapshot();
-  const saveGame = useGameStore((state) => state.saveGame);
-  const openDialog = useUiStore((state) => state.openDialog);
-  if (!game) return null;
-
+export function TopBar({ onMenu }: TopBarProps) {
+  const game = useGameStore((state) => state.game);
+  const revision = useGameStore((state) => state.revision);
+  const setSpeed = useGameStore((state) => state.setSpeed);
   const country = playerCountry(game);
-  if (!country) return null;
-  const owned = ownedTerritories(game, country.id).length;
-  const total = game.world.territories.length;
-  const capital = country.capitalTerritoryId
-    ? game.world.territories.find((territory) => territory.id === country.capitalTerritoryId)
-    : undefined;
+  const totals = playerTotals(game);
+  void revision;
+  if (!game || !country) return null;
 
   return (
     <header className="topbar">
       <div className="topbar__country">
-        <div className="topbar__flag" style={{ background: `linear-gradient(180deg, ${country.accent}, ${country.color})` }} />
-        <div>
-          <div className="topbar__name">{country.name}</div>
-          <div className="topbar__capital">
-            {capital ? `Столица: ${capital.name}` : 'Столица потеряна'}
-          </div>
-        </div>
+        <span className="topbar__flag" style={{ background: country.color }} />
+        <span className="topbar__name">{country.shortName}</span>
       </div>
 
-      <div className="resources">
-        <ResourceChip resource="money" value={country.resources.money} delta={country.income.money} />
-        <ResourceChip resource="metal" value={country.resources.metal} delta={country.income.metal} />
-        <ResourceChip resource="oil" value={country.resources.oil} delta={country.income.oil} />
-        <ResourceChip resource="energy" value={country.resources.energy} delta={country.income.energy} />
+      <div className="topbar__stats">
+        <span className="stat" title="Деньги и доход в час">
+          <span className="stat__label">₽</span>
+          <strong>{formatMoney(country.money)}</strong>
+          <span className={country.income >= 0 ? 'stat__delta stat__delta--up' : 'stat__delta stat__delta--down'}>
+            {formatSigned(country.income)}
+          </span>
+        </span>
+        <span className="stat" title="Население">
+          <span className="stat__label">Люди</span>
+          <strong>{formatPopulation(totals.population)}</strong>
+        </span>
+        <span className="stat" title="Армия">
+          <span className="stat__label">Армия</span>
+          <strong>{Math.round(totals.army)}</strong>
+        </span>
+        <span className="stat stat--dim" title="Территории">
+          <span className="stat__label">Земли</span>
+          <strong>
+            {totals.territories}/{game.world.territories.length}
+          </strong>
+        </span>
       </div>
 
       <div className="topbar__right">
-        <div className="progress-pill" title="Захвачено территорий">
-          <span>Мир</span>
-          <strong>
-            {owned}/{total}
-          </strong>
+        <span className="topbar__date">{formatGameDate(game.tick)}</span>
+        <div className="speeds">
+          {SPEEDS.map((speed) => (
+            <button
+              key={speed.value}
+              type="button"
+              title={speed.title}
+              className={`speed ${game.speed === speed.value ? 'speed--active' : ''}`}
+              onClick={() => setSpeed(speed.value)}
+            >
+              {speed.label}
+            </button>
+          ))}
         </div>
-        <div className="date-chip">
-          <strong>{formatGameDateShort(game.tick)}</strong>
-          <span>
-            {formatGameClock(game.tick)}
-            {game.speed === 0 ? ' · пауза' : ` · ×${game.speed}`}
-          </span>
-        </div>
-        <button type="button" className="btn btn--ghost btn--sm mobile-only" onClick={onToggleLeft} aria-label="Панель армии">
+        <button type="button" className="btn btn--ghost btn--sm" onClick={onMenu} title="Меню партии">
           ☰
-        </button>
-        <button type="button" className="btn btn--ghost btn--sm" onClick={() => void saveGame()}>
-          Сохранить
-        </button>
-        <button type="button" className="btn btn--ghost btn--sm" onClick={() => openDialog({ type: 'settings' })}>
-          Меню
-        </button>
-        <button type="button" className="btn btn--ghost btn--sm mobile-only" onClick={onToggleRight} aria-label="Информация о территории">
-          ⓘ
         </button>
       </div>
     </header>

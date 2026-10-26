@@ -6,11 +6,12 @@ import { GameScreen } from '@/ui/hud/GameScreen';
 
 export default function App() {
   const screen = useGameStore((state) => state.screen);
-  const hasGame = useGameStore.getState().game !== null;
+  const hasGame = useGameStore((state) => state.game !== null);
+  const bootstrap = useGameStore((state) => state.bootstrap);
 
   useEffect(() => {
-    void useGameStore.getState().bootstrap();
-  }, []);
+    void bootstrap();
+  }, [bootstrap]);
 
   if (screen === 'game' && hasGame) return <GameScreen />;
   if (screen === 'countrySelect') return <CountrySelect />;

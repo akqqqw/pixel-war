@@ -1,5 +1,5 @@
 import { clamp, createRng, type Rng } from '@/core/rng';
-import type { CountryId, Resources } from '@/core/types';
+import type { CountryId } from '@/core/types';
 import { TERRAIN, TERRAIN_INFO, type TerrainCode } from '@/core/world/terrain';
 import {
   MAP_HEIGHT,
@@ -361,7 +361,7 @@ function territoryEconomy(
   isCapital: boolean,
   hasRiver: boolean,
   rng: Rng,
-): { population: number; yields: Resources } {
+): { population: number } {
   const size = Math.max(1, tiles.length);
   let popWeight = 0;
   let riverTiles = 0;
@@ -376,42 +376,10 @@ function territoryEconomy(
     (240_000 + fertility * 2_600_000 + size * 20_000) * (isCapital ? 1.8 : 1) * jitter,
   );
 
-  const money =
-    (1.05 + fertility * 1.35 + population / 6_000_000 + (hasRiver ? 0.18 : 0)) *
-    jitter *
-    (isCapital ? 1.25 : 1);
-  const metal =
-    (0.28 +
-      size *
-        (0.0035 +
-          share(TERRAIN.Hills) * 0.016 +
-          share(TERRAIN.Mountain) * 0.026 +
-          share(TERRAIN.Plains) * 0.005 +
-          share(TERRAIN.Forest) * 0.003)) *
-    jitter;
-  const oil =
-    (0.1 +
-      size *
-        (0.001 +
-          share(TERRAIN.Desert) * 0.038 +
-          share(TERRAIN.Plains) * 0.0035 +
-          share(TERRAIN.Tundra) * 0.003)) *
-    jitter;
-  const energy = (0.32 + size * 0.003 + riverTiles * 0.012) * jitter;
-
-  return {
-    population,
-    yields: {
-      money: round3(money),
-      metal: round3(metal),
-      oil: round3(oil),
-      energy: round3(energy),
-    },
-  };
-}
-
-function round3(value: number): number {
-  return Math.round(value * 1000) / 1000;
+  void share;
+  void hasRiver;
+  void riverTiles;
+  return { population };
 }
 
 function bfsDistances(adjacency: ReadonlyMap<string, readonly string[]>, start: string): Map<string, number> {
@@ -633,13 +601,22 @@ export function generateWorld(options: GenerateWorldOptions): WorldData {
       dominantTerrain: dominant,
       terrainMix: draft.mix,
       population: econ.population,
-      baseYields: econ.yields,
       isCoastal: draft.coastal,
       hasRiver: draft.hasRiver,
       initialOwner: null,
       isCapital: false,
     };
   });
+
+  // Re-index the tile map by the final territory order so `tileTerritory[i]`
+  // always points at `territories[i]` (regions were sorted for naming above).
+  const regionToOrder = new Map<number, number>();
+  territoryDrafts.forEach((draft, order) => regionToOrder.set(draft.index, order));
+  for (let i = 0; i < owner.length; i += 1) {
+    const region = owner[i]!;
+    if (region < 0) continue;
+    owner[i] = regionToOrder.get(region) ?? -1;
+  }
 
   // Adjacency (8-neighbourhood so diagonal touching coast counts as a border).
   const adjacency = new Map<string, Set<string>>();

@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 
-const MIN_ZOOM = 0.55;
-const MAX_ZOOM = 4.5;
+const MIN_ZOOM = 0.6;
+const MAX_ZOOM = 4;
 
 /** Mouse/touch camera: drag to pan, wheel or pinch to zoom, smooth focus on demand. */
 export class CameraController {
@@ -19,7 +19,7 @@ export class CameraController {
     this.worldWidth = worldWidth;
     this.worldHeight = worldHeight;
     this.camera.setBounds(0, 0, worldWidth, worldHeight);
-    this.targetZoom = 1.6;
+    this.targetZoom = 1;
     this.camera.setZoom(this.targetZoom);
     this.camera.setRoundPixels(true);
   }

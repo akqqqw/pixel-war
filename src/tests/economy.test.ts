@@ -1,70 +1,123 @@
 import { describe, expect, it } from 'vitest';
+import { BALANCE } from '@/core/sim/balance';
+import { build, armyCap, maxRecruit, recruit } from '@/core/sim/actions';
+import { countryTotals, growTerritory, runEconomyTick } from '@/core/sim/economy';
+import { countryIncome, territoryIncome } from '@/core/sim/effects';
 import { createGame } from '@/core/state/createGame';
-import { computeEconomy, runEconomyTick, territoryYield, UNREST_DURATION_TICKS } from '@/core/economy/economy';
-import { makeArmy } from '@/core/units/army';
-import { RESOURCE_KEYS } from '@/core/types';
-import { commandUpgradeEconomy } from '@/core/sim/commands';
 
-function newGame() {
-  return createGame({ seed: 4242, playerCountryId: 'aquilonia', difficulty: 'normal' });
+function setup(seed = 202) {
+  const game = createGame({ seed, playerCountryId: 'aquilonia', difficulty: 'normal' });
+  const playerId = game.playerCountryId;
+  const owned = Object.values(game.territories).filter((t) => t.owner === playerId);
+  const capital = game.territories[game.countries[playerId]!.capitalTerritoryId!]!;
+  return { game, playerId, owned, capital };
 }
 
 describe('economy', () => {
-  it('produces income from owned territories and charges upkeep', () => {
-    const game = newGame();
-    const breakdown = computeEconomy(game.world, game, game.playerCountryId);
-    expect(breakdown.territoryCount).toBeGreaterThan(5);
-    for (const key of RESOURCE_KEYS) {
-      expect(breakdown.gross[key]).toBeGreaterThan(0);
-      expect(Number.isFinite(breakdown.net[key])).toBe(true);
+  it('pays tax, charges upkeep and never goes negative', () => {
+    const { game, playerId, owned } = setup();
+    const country = game.countries[playerId]!;
+    const before = country.money;
+    const income = countryIncome(game, playerId);
+
+    const army = countryTotals(game, playerId).army;
+    const tax = owned.reduce((sum, territory) => sum + territoryIncome(game, territory), 0);
+    expect(tax).toBeGreaterThan(0);
+    expect(income).toBeCloseTo(tax - army * BALANCE.armyUpkeep, 1);
+
+    runEconomyTick(game);
+    expect(country.income).toBeCloseTo(income, 0);
+    expect(country.money).toBeCloseTo(before + income, 0);
+    expect(country.money).toBeGreaterThanOrEqual(0);
+  });
+
+  it('disbands the army when the treasury is empty', () => {
+    const { game, playerId, capital } = setup();
+    const country = game.countries[playerId]!;
+    country.money = 0;
+    // Unpayable upkeep: the whole army is far above what the treasury supports.
+    for (const territory of Object.values(game.territories)) {
+      if (territory.owner === playerId) territory.army = 2000;
     }
-    expect(breakdown.upkeep.money).toBeGreaterThan(0);
+    const before = capital.army;
+    runEconomyTick(game);
+    expect(country.unpaid).toBe(true);
+    expect(country.money).toBe(0);
+    expect(capital.army).toBeLessThan(before);
   });
 
-  it('never allows negative resources and flags deficits', () => {
-    const game = newGame();
-    const country = game.countries[game.playerCountryId]!;
-    country.resources = { money: 0, metal: 0, oil: 0, energy: 0 };
-    const capital = country.capitalTerritoryId!;
-    game.territories[capital]!.garrison = makeArmy({ mbt: 40, spg: 20, mlrs: 10 });
-    for (let i = 0; i < 10; i += 1) runEconomyTick(game);
-    for (const key of RESOURCE_KEYS) {
-      expect(country.resources[key]).toBeGreaterThanOrEqual(0);
+  it('grows population up to the territory capacity', () => {
+    const { game, playerId, owned } = setup();
+    const empty = owned.find((territory) => territory.buildings.length === 0)!;
+    expect(empty).toBeTruthy();
+    empty.population = 100;
+    growTerritory(empty);
+    expect(empty.population).toBeGreaterThan(100);
+
+    empty.population = BALANCE.basePopulationCap;
+    growTerritory(empty);
+    expect(empty.population).toBe(BALANCE.basePopulationCap);
+
+    // A city raises the ceiling.
+    game.countries[playerId]!.money = 10_000;
+    expect(build(game, playerId, empty.id, 'city').ok).toBe(true);
+    for (let i = 0; i < 50; i += 1) growTerritory(empty);
+    expect(empty.population).toBeGreaterThan(BALANCE.basePopulationCap);
+  });
+
+  it('recruits only from own population and never exceeds the cap', () => {
+    const { game, playerId, capital } = setup();
+    const country = game.countries[playerId]!;
+    country.money = 10_000;
+    const cap = armyCap(capital);
+    expect(cap).toBeGreaterThan(0);
+
+    const available = maxRecruit(game, capital.id);
+    expect(available).toBeGreaterThan(0);
+    const armyBefore = capital.army;
+    const popBefore = capital.population;
+    const moneyBefore = country.money;
+
+    expect(recruit(game, playerId, capital.id, available).ok).toBe(true);
+    expect(capital.army).toBeCloseTo(armyBefore + available, 1);
+    expect(capital.population).toBeCloseTo(popBefore - available * BALANCE.populationPerArmy, 1);
+    expect(country.money).toBeCloseTo(moneyBefore - available * BALANCE.recruitCost, 1);
+    expect(capital.army).toBeLessThanOrEqual(cap + 1e-6);
+    expect(maxRecruit(game, capital.id)).toBe(0);
+    expect(recruit(game, playerId, capital.id, 1).ok).toBe(false);
+  });
+
+  it('forbids recruiting outside the country', () => {
+    const { game, playerId } = setup();
+    const foreign = Object.values(game.territories).find((t) => t.owner !== playerId)!;
+    expect(recruit(game, playerId, foreign.id, 1).ok).toBe(false);
+    expect(foreign.army).toBeGreaterThan(0);
+  });
+
+  it('does not allow armies above the population cap to be kept', () => {
+    const { game, capital } = setup();
+    capital.population = 100;
+    capital.army = 999;
+    expect(armyCap(capital)).toBe(Math.floor(100 * BALANCE.armyCapRatio));
+    const { game: game2, playerId } = setup();
+    const territory = Object.values(game2.territories).find((t) => t.owner === playerId)!;
+    territory.population = 100;
+    territory.army = 999;
+    expect(maxRecruit(game2, territory.id)).toBe(0);
+    expect(game.world.territories.length).toBeGreaterThan(0);
+  });
+
+  it('keeps every resource of every country valid over a long run', () => {
+    const { game } = setup(555);
+    for (let tick = 0; tick < 120; tick += 1) {
+      runEconomyTick(game);
+      for (const territory of Object.values(game.territories)) {
+        expect(territory.population).toBeGreaterThan(0);
+        expect(territory.army).toBeGreaterThanOrEqual(0);
+      }
+      for (const country of Object.values(game.countries)) {
+        expect(country.money).toBeGreaterThanOrEqual(0);
+      }
     }
-    expect(country.deficit.money || country.deficit.oil).toBe(true);
-  });
-
-  it('economy upgrades raise yields and reduce unrest over time', () => {
-    const game = newGame();
-    const capital = game.countries[game.playerCountryId]!.capitalTerritoryId!;
-    const state = game.territories[capital]!;
-    const territory = game.world.territories.find((item) => item.id === capital)!;
-    const before = territoryYield(territory, state, true);
-    const country = game.countries[game.playerCountryId]!;
-    country.resources = { money: 5000, metal: 5000, oil: 5000, energy: 5000 };
-    const result = commandUpgradeEconomy(game, { countryId: country.id, territoryId: capital });
-    expect(result.ok).toBe(true);
-    const after = territoryYield(territory, state, true);
-    expect(after.money).toBeGreaterThan(before.money);
-
-    state.unrest = 1;
-    for (let i = 0; i < UNREST_DURATION_TICKS; i += 1) runEconomyTick(game);
-    expect(state.unrest).toBeLessThan(0.1);
-
-    // Upgrades are capped.
-    state.economyLevel = 3;
-    expect(commandUpgradeEconomy(game, { countryId: country.id, territoryId: capital }).ok).toBe(false);
-  });
-
-  it('unrest reduces production of a freshly conquered territory', () => {
-    const game = newGame();
-    const capital = game.countries[game.playerCountryId]!.capitalTerritoryId!;
-    const state = game.territories[capital]!;
-    const territory = game.world.territories.find((item) => item.id === capital)!;
-    state.unrest = 1;
-    const troubled = territoryYield(territory, state, true);
-    state.unrest = 0;
-    const calm = territoryYield(territory, state, true);
-    expect(troubled.money).toBeLessThan(calm.money);
   });
 });

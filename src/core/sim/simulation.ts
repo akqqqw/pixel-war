@@ -1,111 +1,56 @@
-import { createRng, type Rng } from '@/core/rng';
-import type { GameState } from '@/core/state/types';
-import { runEconomyTick } from '@/core/economy/economy';
-import { runProductionTick } from '@/core/sim/production';
-import { resolveArrival } from '@/core/sim/combat';
+import { runAi } from '@/core/ai/ai';
+import { BALANCE, TICK_MS } from '@/core/sim/balance';
+import { runEconomyTick } from '@/core/sim/economy';
+import { stepFrontline } from '@/core/sim/frontline';
 import { checkVictory } from '@/core/sim/victory';
-import { runAiTurn } from '@/core/ai/ai';
-import { travelMilliseconds } from '@/core/sim/path';
+import { fireMissiles } from '@/core/sim/weapons';
+import type { GameState } from '@/core/state/types';
 
-export const TICK_MS = 1000;
+export const MAX_TICKS_PER_FRAME = 8;
 
-function advanceGroups(state: GameState, dtMs: number, rng: Rng): void {
-  for (const [groupId, group] of Object.entries(state.groups)) {
-    const movement = group.movement;
-    if (!movement) continue;
-    const country = state.countries[group.country];
-    if (!country || !country.alive) {
-      delete state.groups[groupId];
-      continue;
-    }
-
-    if (movement.milliseconds <= 0) {
-      const nextId = movement.path[movement.step];
-      movement.milliseconds = nextId
-        ? travelMilliseconds(state.world, group.territoryId, nextId, group.army, country)
-        : TICK_MS;
-    }
-
-    movement.progress += dtMs;
-    let guard = 0;
-    while (group.movement && group.movement.progress >= group.movement.milliseconds && guard < 6) {
-      guard += 1;
-      const mv = group.movement;
-      const nextId = mv.path[mv.step];
-      if (!nextId) {
-        delete state.groups[groupId];
-        break;
-      }
-      group.territoryId = nextId;
-      mv.progress = Math.max(0, mv.progress - Math.max(1, mv.milliseconds));
-
-      if (mv.step >= mv.path.length - 1) {
-        resolveArrival(state, groupId, rng);
-        break;
-      }
-      mv.step += 1;
-      const following = mv.path[mv.step];
-      mv.milliseconds = following
-        ? travelMilliseconds(state.world, group.territoryId, following, group.army, country)
-        : TICK_MS;
-    }
-  }
-}
-
-function runAiPhases(state: GameState, rng: Rng): void {
-  for (const ai of Object.values(state.ai)) {
-    const country = state.countries[ai.country];
-    if (!country || !country.alive || country.isPlayer) continue;
-    if (state.tick < ai.nextThinkTick) continue;
-    runAiTurn(state, ai.country, rng);
-  }
-}
-
-/** Advances the simulation by one game tick (one second at ×1 speed). */
-export function runTick(state: GameState, dtMs = TICK_MS): void {
+/** One in-game hour. */
+export function runTick(state: GameState): void {
   if (state.status !== 'playing') return;
-  const rng = createRng(state.rngState);
   state.tick += 1;
-  state.playedMs += dtMs;
-
   runEconomyTick(state);
-  runProductionTick(state, dtMs / TICK_MS);
-  advanceGroups(state, dtMs, rng);
-  runAiPhases(state, rng);
+  runAi(state);
+  fireMissiles(state);
+  stepFrontline(state);
   checkVictory(state);
-
-  state.rngState = rng.getState();
 }
 
-/** Drives ticks in real time. Canvas-independent, so it also runs in tests. */
+/**
+ * Turns real time into whole game ticks. Keeps a remainder so the simulation
+ * stays smooth at ×1 and ×4 and never runs away after a tab switch.
+ */
 export class GameClock {
   private accumulator = 0;
-  private state: GameState;
 
-  constructor(state: GameState) {
-    this.state = state;
-  }
+  constructor(private readonly state: GameState) {}
 
-  setState(state: GameState): void {
-    this.state = state;
-    this.accumulator = 0;
-  }
-
-  /** Feeds real elapsed milliseconds; returns how many ticks were simulated. */
   advance(deltaMs: number): number {
-    if (this.state.status !== 'playing') return 0;
-    const speed = this.state.speed;
-    if (speed === 0) return 0;
-    const scaled = Math.min(deltaMs, 5000) * speed;
-    this.accumulator += scaled;
+    if (this.state.speed === 0 || this.state.status !== 'playing') return 0;
+    const delta = Math.min(deltaMs, 5000);
+    this.accumulator += delta;
+    const interval = TICK_MS / (this.state.speed === 1 ? 1 : this.state.speed === 2 ? 2 : 4);
     let ticks = 0;
-    while (this.accumulator >= TICK_MS && ticks < 8) {
-      this.accumulator -= TICK_MS;
-      runTick(this.state, TICK_MS);
+    while (this.accumulator >= interval && ticks < MAX_TICKS_PER_FRAME * this.state.speed) {
+      this.accumulator -= interval;
       ticks += 1;
-      if (this.state.status !== 'playing') break;
     }
-    this.state.tickProgressMs = this.accumulator;
+    if (ticks === MAX_TICKS_PER_FRAME * this.state.speed) this.accumulator = 0;
+    for (let i = 0; i < ticks; i += 1) runTick(this.state);
     return ticks;
   }
+
+  reset(): void {
+    this.accumulator = 0;
+  }
 }
+
+/** Monthly budget hint for the HUD (money per hour). */
+export function incomeHint(state: GameState, countryId: string): number {
+  return state.countries[countryId]?.income ?? 0;
+}
+
+export { BALANCE };

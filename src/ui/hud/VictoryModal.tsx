@@ -1,22 +1,22 @@
 import { useGameStore } from '@/store/gameStore';
 import { Modal } from '@/ui/components/Modal';
 import { formatGameDate } from '@/core/time/gameDate';
-import { ownedTerritories, playerCountry, useGameSnapshot } from '@/ui/helpers/game';
+import { ownedCount, playerCountry, playerTotals } from '@/ui/helpers/game';
+import { formatPopulation } from '@/ui/helpers/format';
 
 export function VictoryModal() {
-  const game = useGameSnapshot();
-  const setScreen = useGameStore((state) => state.setScreen);
+  const game = useGameStore((state) => state.game);
   const exitToMenu = useGameStore((state) => state.exitToMenu);
+  const setScreen = useGameStore((state) => state.setScreen);
+  const country = playerCountry(game);
   if (!game || game.status === 'playing') return null;
-  const player = playerCountry(game);
-  const victory = game.victory;
   const won = game.status === 'victory';
+  const totals = playerTotals(game);
 
   return (
     <Modal
       title={won ? 'Победа' : 'Поражение'}
       onClose={exitToMenu}
-      closeOnBackdrop={false}
       size="small"
       footer={
         <>
@@ -29,46 +29,39 @@ export function VictoryModal() {
         </>
       }
     >
-      <div
-        style={{
-          padding: 14,
-          border: `2px solid ${won ? '#3c7a45' : '#8a3a32'}`,
-          background: won
-            ? 'linear-gradient(135deg, rgba(32,72,40,.85), rgba(10,20,33,.9))'
-            : 'linear-gradient(135deg, rgba(74,26,22,.85), rgba(10,20,33,.9))',
-        }}
-      >
-        <div className="menu__eyebrow" style={{ color: won ? 'var(--green)' : 'var(--red)' }}>
-          {won ? 'Кампания завершена' : 'Кампания провалена'}
-        </div>
-        <h3 style={{ margin: '6px 0', fontSize: 20 }}>{victory?.title ?? (won ? 'Победа' : 'Поражение')}</h3>
-        <p className="small muted" style={{ margin: 0 }}>
-          {victory?.description ?? 'Партия завершена.'}
-        </p>
+      <div className={`victory victory--${won ? 'win' : 'loss'}`}>
+        <div className="victory__eyebrow">{won ? 'Кампания завершена' : 'Кампания провалена'}</div>
+        <h3>{game.victory?.title ?? (won ? 'Победа' : 'Поражение')}</h3>
+        <p>{game.victory?.description ?? 'Партия окончена.'}</p>
       </div>
-      <div className="stack small">
-        <div className="row row--between">
-          <span className="muted">Дата окончания</span>
-          <strong>{formatGameDate(game.tick)}</strong>
+      <dl className="facts">
+        <div>
+          <dt>Государство</dt>
+          <dd>{country?.name ?? '—'}</dd>
         </div>
-        <div className="row row--between">
-          <span className="muted">Территорий под контролем</span>
-          <strong>
-            {player ? ownedTerritories(game, player.id).length : 0} / {game.world.territories.length}
-          </strong>
+        <div>
+          <dt>Дата</dt>
+          <dd>{formatGameDate(game.tick)}</dd>
         </div>
-        <div className="row row--between">
-          <span className="muted">Побед в сражениях</span>
-          <strong>{player?.stats.battlesWon ?? 0}</strong>
+        <div>
+          <dt>Территории</dt>
+          <dd>
+            {country ? ownedCount(game, country.id) : 0} / {game.world.territories.length}
+          </dd>
         </div>
-        <div className="row row--between">
-          <span className="muted">Захвачено территорий</span>
-          <strong>{player?.stats.captured ?? 0}</strong>
+        <div>
+          <dt>Население</dt>
+          <dd>{formatPopulation(totals.population)}</dd>
         </div>
-      </div>
-      <div className="tiny muted">
-        Партия сохранена в автосейве — можно вернуться к ней позже или начать новую кампанию.
-      </div>
+        <div>
+          <dt>Захвачено территорий</dt>
+          <dd>{country?.stats.captured ?? 0}</dd>
+        </div>
+        <div>
+          <dt>Построено зданий</dt>
+          <dd>{country?.stats.buildings ?? 0}</dd>
+        </div>
+      </dl>
     </Modal>
   );
 }

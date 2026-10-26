@@ -5,8 +5,7 @@ export function createPhaserGame(parent: HTMLElement): Phaser.Game {
   return new Phaser.Game({
     type: Phaser.AUTO,
     parent,
-    backgroundColor: '#07101d',
-    transparent: false,
+    backgroundColor: '#0a1626',
     pixelArt: true,
     roundPixels: true,
     antialias: false,
@@ -18,12 +17,7 @@ export function createPhaserGame(parent: HTMLElement): Phaser.Game {
       width: parent.clientWidth || 800,
       height: parent.clientHeight || 600,
     },
-    render: {
-      antialias: false,
-      pixelArt: true,
-      roundPixels: true,
-      powerPreference: 'high-performance',
-    },
+    render: { antialias: false, pixelArt: true, roundPixels: true, powerPreference: 'high-performance' },
     scene: [WorldScene],
   });
 }

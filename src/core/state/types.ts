@@ -1,160 +1,69 @@
-import type { CountryId, Resources, TerritoryId } from '@/core/types';
+import type { BuildingKind } from '@/core/buildings/buildings';
+import type { CountryId, TerritoryId } from '@/core/types';
 import type { WorldData } from '@/core/world/world';
-import type { Army } from '@/core/units/army';
-import type { LandUnitType } from '@/core/units/unitTypes';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 export type GameSpeed = 0 | 1 | 2 | 4;
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export type GameStatus = 'playing' | 'victory' | 'defeat';
 
-export interface ResourceDeficit {
-  money: boolean;
-  metal: boolean;
-  oil: boolean;
-  energy: boolean;
+export interface BuildingInstance {
+  id: string;
+  kind: BuildingKind;
+  /** First map tile of the structure (used for drawing and radius checks). */
+  tile: number;
 }
 
 export interface TerritoryState {
   id: TerritoryId;
-  owner: CountryId;
+  owner: CountryId | null;
+  /** Thousands of people. Grows with cities, feeds the army. */
   population: number;
-  /** 1..3 — infrastructure that boosts yields and defence. */
-  economyLevel: number;
-  /** Stationary defenders. Mobile detachments live in `groups`. */
-  garrison: Army;
-  /** 0..1 — recently conquered land earns less until it settles. */
-  unrest: number;
-  /** Tick at which the territory was captured (for the map flash animation). */
+  /** Abstract army points — no unit models, just numbers. */
+  army: number;
+  buildings: BuildingInstance[];
+  /** Money per tick, refreshed by the economy tick. */
+  income: number;
+  /** Set when the territory was taken (for the map flash). */
   capturedAtTick: number | null;
-  /** Cached per-tick income, recomputed by the economy tick (UI read-only). */
-  lastYield: Resources;
-}
-
-export type OrderKind = 'move' | 'attack' | 'defend';
-
-export interface UnitOrder {
-  kind: OrderKind;
-  targetTerritoryId: TerritoryId;
-}
-
-export interface GroupMovement {
-  path: TerritoryId[];
-  /** Index of the territory the group is heading to. */
-  step: number;
-  /** 0..1 progress towards `path[step]`. */
-  progress: number;
-  milliseconds: number;
-  originTerritoryId: TerritoryId;
-}
-
-export interface UnitGroup {
-  id: string;
-  country: CountryId;
-  /** Territory the group is standing in (or left from while moving). */
-  territoryId: TerritoryId;
-  army: Army;
-  order: UnitOrder | null;
-  movement: GroupMovement | null;
-  /** Set when the group was sent to conquer: becomes the target on arrival. */
-  intent: 'move' | 'attack';
-  /** Tick when the group arrived, used for map animations. */
-  arrivedAtTick: number;
 }
 
 export interface CountryState {
   id: CountryId;
   name: string;
+  shortName: string;
   color: string;
   accent: string;
   isPlayer: boolean;
   capitalTerritoryId: TerritoryId | null;
-  resources: Resources;
-  /** Net income per tick (positive or negative), refreshed every tick. */
-  income: Resources;
-  deficit: ResourceDeficit;
-  reputation: number;
-  /** Relation score -100..100 towards each other country. */
-  relations: Record<CountryId, number>;
-  warWith: CountryId[];
+  money: number;
+  income: number;
+  /** True when the treasury is empty and the army is disbanding. */
+  unpaid: boolean;
   alive: boolean;
-  /** AI only: how aggressively this nation expands (0..1). */
+  /** AI only: 0..1 expansion appetite. */
   aggression: number;
+  warWith: CountryId[];
   stats: {
-    produced: number;
+    buildings: number;
     captured: number;
     lost: number;
-    battlesWon: number;
-    battlesLost: number;
+    missiles: number;
   };
 }
-
-export interface ProductionItem {
-  id: string;
-  country: CountryId;
-  territoryId: TerritoryId;
-  unit: LandUnitType;
-  ticksLeft: number;
-  totalTicks: number;
-}
-
-export interface BattleRoundLog {
-  index: number;
-  attackerDamage: number;
-  defenderDamage: number;
-  attackerHpLeft: number;
-  defenderHpLeft: number;
-}
-
-export interface BattleReport {
-  id: string;
-  tick: number;
-  territoryId: TerritoryId;
-  territoryName: string;
-  attackerCountry: CountryId;
-  defenderCountry: CountryId;
-  attackerArmy: Army;
-  defenderArmy: Army;
-  attackerLosses: Army;
-  defenderLosses: Army;
-  outcome: 'attackerWin' | 'defenderWin' | 'stalemate';
-  captured: boolean;
-  rounds: BattleRoundLog[];
-  attackerTerrainMod: number;
-  defenderTerrainBonus: number;
-}
-
-export type GameEventKind =
-  | 'capture'
-  | 'battle'
-  | 'production'
-  | 'economy'
-  | 'diplomacy'
-  | 'victory'
-  | 'system';
 
 export interface GameEvent {
   id: string;
   tick: number;
-  kind: GameEventKind;
-  message: string;
+  kind: 'build' | 'capture' | 'war' | 'peace' | 'missile' | 'victory' | 'defeat';
+  text: string;
   countryId?: CountryId;
   territoryId?: TerritoryId;
-  previousOwnerId?: CountryId;
-}
-
-export interface AiState {
-  country: CountryId;
-  difficulty: Difficulty;
-  /** Tick when the AI will reconsider its plans. */
-  nextThinkTick: number;
-  /** Territory the AI wants to attack next (debug / HUD). */
-  focusTarget: TerritoryId | null;
 }
 
 export interface VictoryInfo {
-  kind: 'domination' | 'military' | 'economic' | 'none';
+  kind: 'domination' | 'military';
   countryId: CountryId;
   title: string;
   description: string;
@@ -163,27 +72,33 @@ export interface VictoryInfo {
 export interface GameState {
   version: number;
   seed: number;
-  world: WorldData;
-  status: GameStatus;
   difficulty: Difficulty;
+  tick: number;
+  speed: GameSpeed;
+  status: GameStatus;
   playerCountryId: CountryId;
+  world: WorldData;
   countries: Record<CountryId, CountryState>;
   territories: Record<TerritoryId, TerritoryState>;
-  groups: Record<string, UnitGroup>;
-  production: ProductionItem[];
-  battles: BattleReport[];
+  /** Country index per map tile, -1 for water/neutral. */
+  tileOwner: Int16Array;
+  /** `countryOrder[i]` is the country stored as index `i` in `tileOwner`. */
+  countryOrder: CountryId[];
   events: GameEvent[];
-  tick: number;
-  /** Milliseconds accumulated inside the current tick (0..1000). */
-  tickProgressMs: number;
-  speed: GameSpeed;
-  startedAt: number;
-  playedMs: number;
-  nextIds: { group: number; production: number; event: number; battle: number };
-  selectedTerritoryId: TerritoryId | null;
-  selectedGroupIds: string[];
+  nextIds: { building: number; event: number };
+  /** Tick when each missile launcher may fire again, keyed by building id. */
+  missileReady: Record<string, number>;
   victory: VictoryInfo | null;
-  rngState: number;
-  ai: Record<CountryId, AiState>;
-  camera: { x: number; y: number; zoom: number };
+  /** Number of cells that changed hands during the last tick (HUD read-only). */
+  lastFlips: number;
+}
+
+export function countryIndexOf(state: GameState, countryId: CountryId | null | undefined): number {
+  if (!countryId) return -1;
+  return state.countryOrder.indexOf(countryId);
+}
+
+export function countryAt(state: GameState, index: number): CountryState | null {
+  const id = state.countryOrder[index];
+  return id ? state.countries[id] ?? null : null;
 }

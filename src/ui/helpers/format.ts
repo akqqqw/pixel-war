@@ -1,35 +1,30 @@
-import type { Resources } from '@/core/types';
-
-const numberFormatter = new Intl.NumberFormat('ru-RU');
-
+/** 12345 -> "12 345" */
 export function formatInt(value: number): string {
-  return numberFormatter.format(Math.round(value));
+  const rounded = Math.round(Number.isFinite(value) ? value : 0);
+  return rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
-export function formatResource(value: number): string {
-  if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(1)}k`;
-  return value.toFixed(Math.abs(value) < 10 ? 1 : 0);
+/** Money with one decimal only when it matters. */
+export function formatMoney(value: number): string {
+  const safe = Number.isFinite(value) ? value : 0;
+  if (Math.abs(safe) >= 1000) return formatInt(safe);
+  return (Math.round(safe * 10) / 10).toString();
 }
 
-export function formatDelta(value: number): string {
-  const rounded = Math.round(value * 10) / 10;
-  const sign = rounded > 0 ? '+' : '';
-  return `${sign}${rounded.toFixed(1)}`;
+export function formatSigned(value: number, digits = 1): string {
+  const safe = Number.isFinite(value) ? value : 0;
+  const rounded = Math.round(safe * 10 ** digits) / 10 ** digits;
+  return `${rounded > 0 ? '+' : ''}${rounded}`;
 }
 
+/** Population is stored in thousands: 240 -> "240 тыс." */
 export function formatPopulation(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)} млн`;
-  return `${Math.round(value / 1000)} тыс`;
+  const safe = Math.max(0, Number.isFinite(value) ? value : 0);
+  if (safe >= 1000) return `${(safe / 1000).toFixed(2).replace('.', ',')} млн`;
+  return `${formatInt(safe)} тыс.`;
 }
 
-export function formatPercent(value: number): string {
-  return `${Math.round(value * 100)}%`;
-}
-
-export function resourceDelta(resources: Resources): string {
-  return `${formatDelta(resources.money)} ₽`;
-}
-
-export function clampText(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+export function formatArmy(value: number): string {
+  const safe = Math.max(0, Number.isFinite(value) ? value : 0);
+  return formatInt(safe);
 }

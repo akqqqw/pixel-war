@@ -1,311 +1,194 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-
-// Phaser needs WebGL and a real canvas; the scene is covered by the painter tests.
-vi.mock('@/game/PhaserGame', () => ({
-  createPhaserGame: () => ({ scale: { refresh: () => undefined }, destroy: () => undefined }),
-}));
-vi.mock('@/game/scenes/WorldScene', () => ({ WorldScene: class {} }));
-
-import { useGameStore } from '@/store/gameStore';
-import { useUiStore } from '@/ui/state/uiStore';
-import { MainMenu } from '@/ui/menu/MainMenu';
-import { CountrySelect } from '@/ui/menu/CountrySelect';
-import { GameScreen } from '@/ui/hud/GameScreen';
-import { LeftPanel } from '@/ui/hud/LeftPanel';
-import { RightPanel } from '@/ui/hud/RightPanel';
-import { TopBar } from '@/ui/hud/TopBar';
-import { BottomBar } from '@/ui/hud/BottomBar';
-import { MapOverlay } from '@/ui/hud/MapOverlay';
-import { BattleReportModal } from '@/ui/hud/BattleReportModal';
-import { VictoryModal } from '@/ui/hud/VictoryModal';
-import { SendArmyDialog } from '@/ui/hud/SendArmyDialog';
-import { Tutorial } from '@/ui/hud/Tutorial';
-import { EventToasts } from '@/ui/hud/EventToasts';
-import { HelpDialog, SavesDialog, SettingsDialog } from '@/ui/dialogs/Dialogs';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import App from '@/App';
+import { COUNTRIES } from '@/data/countries';
 import { createGame } from '@/core/state/createGame';
-import type { Difficulty } from '@/core/state/types';
-import { runTick } from '@/core/sim/simulation';
-import { commandQueueUnit, commandSendArmy, commandUpgradeEconomy } from '@/core/sim/commands';
-import { makeArmy } from '@/core/units/army';
-import { findOrderPath } from '@/core/sim/path';
+import { useGameStore } from '@/store/gameStore';
+import { BottomPanel } from '@/ui/hud/BottomPanel';
+import { MainMenu } from '@/ui/menu/MainMenu';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
+let container: HTMLDivElement;
+let root: Root;
 
-function findButton(text: string): HTMLButtonElement | undefined {
-  return ([...document.querySelectorAll('button')] as HTMLButtonElement[]).find(
-    (button) => button.textContent?.trim() === text,
-  );
+function render(element: React.ReactElement): void {
+  act(() => {
+    root.render(element);
+  });
 }
 
-function renderUi(node: React.ReactNode): string {
+function buttonByText(text: string): HTMLButtonElement {
+  const buttons = [...container.querySelectorAll('button')];
+  const found = buttons.find((button) => (button.textContent ?? '').includes(text));
+  if (!found) throw new Error(`Кнопка «${text}» не найдена: ${buttons.map((b) => b.textContent).join(' | ')}`);
+  return found as HTMLButtonElement;
+}
+
+beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
-  const localRoot = createRoot(container);
-  root = localRoot;
+  root = createRoot(container);
+  localStorage.clear();
   act(() => {
-    localRoot.render(node);
+    useGameStore.setState({
+      screen: 'menu',
+      game: null,
+      clock: null,
+      saves: [],
+      notices: [],
+      selectedTerritoryId: null,
+      buildingChoice: null,
+      transferFrom: null,
+      pendingCountry: 'aquilonia',
+    });
   });
-  return container.innerHTML;
-}
-
-afterEach(() => {
-  act(() => root?.unmount());
-  root = null;
-  container?.remove();
-  container = null;
-  document.body.innerHTML = '';
 });
 
-function installGame(difficulty: Difficulty = 'normal') {
-  const game = createGame({ seed: 9091, playerCountryId: 'aquilonia', difficulty });
-  useGameStore.setState({
-    game,
-    clock: null,
-    screen: 'game',
-    revision: 1,
-    selectedTerritoryId: game.countries[game.playerCountryId]?.capitalTerritoryId ?? null,
-    notices: [],
-    battleReport: null,
-    tutorialStep: 0,
-    settings: { labels: true, effects: true, autosave: false },
-  });
-  return game;
-}
+afterEach(() => {
+  act(() => root.unmount());
+  container.remove();
+});
 
-describe('UI with real game data', () => {
-  beforeEach(() => {
-    useUiStore.setState({ dialog: null, leftOpen: false, rightOpen: false, });
+describe('interface', () => {
+  it('opens the new campaign flow from the main menu', () => {
+    render(<App />);
+    expect(container.textContent).toContain('МИРОВОЕ');
+    expect(container.textContent).toContain('Пиксельная военная стратегия');
+
+    act(() => buttonByText('Новая игра').click());
+    expect(useGameStore.getState().screen).toBe('countrySelect');
+    expect(container.textContent).toContain('Выбор государства');
   });
 
-  it('renders the main menu and country selection', async () => {
-    useGameStore.setState({ screen: 'menu', saves: [], game: null });
-    const menu = renderUi(<MainMenu />);
-    expect(menu).toContain('Мировое');
-    expect(menu).toContain('Новая игра');
-    expect(menu).toContain('Продолжить');
-    act(() => root?.unmount());
-    root = null;
-    container?.remove();
+  it('shows every country with its bonus and starts the chosen one', () => {
+    render(<App />);
+    act(() => buttonByText('Новая игра').click());
 
-    const select = renderUi(<CountrySelect />);
-    expect(select).toContain('Выбор государства');
-    expect(select).toContain('Аквилония');
-    expect(select).toContain('Начать кампанию');
-    expect(select).toContain('Сложность ИИ');
-    await useGameStore.getState().refreshSaves();
+    for (const country of COUNTRIES) expect(container.textContent).toContain(country.name);
+    for (const country of COUNTRIES) expect(container.textContent).toContain(country.bonus.name);
+    expect(container.querySelectorAll('.country')).toHaveLength(COUNTRIES.length);
+
+    const draconia = COUNTRIES.find((country) => country.id === 'draconia')!;
+    act(() => buttonByText(draconia.name).click());
+    expect(useGameStore.getState().pendingCountry).toBe('draconia');
+
+    act(() => buttonByText('Начать кампанию').click());
+    const state = useGameStore.getState();
+    expect(state.screen).toBe('game');
+    expect(state.game).not.toBeNull();
+    expect(state.game!.playerCountryId).toBe('draconia');
+    expect(state.selectedTerritoryId).toBe(state.game!.countries.draconia!.capitalTerritoryId);
   });
 
-  it('renders the full HUD for an owned territory', () => {
-    const game = installGame();
-    const markup = renderUi(
-      <>
-        <TopBar onToggleLeft={() => undefined} onToggleRight={() => undefined} />
-        <LeftPanel />
-        <RightPanel />
-        <BottomBar onToggleLeft={() => undefined} onToggleRight={() => undefined} />
-        <MapOverlay />
-        <Tutorial />
-        <EventToasts />
-      </>,
-    );
-    const capital = game.world.territories.find(
-      (territory) => territory.id === game.countries[game.playerCountryId]!.capitalTerritoryId,
-    )!;
-    expect(markup).toContain('Республика Аквилония');
-    expect(markup).toContain(capital.name);
-    expect(markup).toContain('Гарнизон');
-    expect(markup).toContain('Перебросить');
-    expect(markup).toContain('Производство');
-    expect(markup).toContain('ОБТ');
-    expect(markup).not.toContain('undefined');
-  });
-
-  it('produces, develops and attacks from the right panel', () => {
-    const game = installGame();
-    const player = game.countries[game.playerCountryId]!;
-    player.resources = { money: 5000, metal: 5000, oil: 5000, energy: 5000 };
-    const capital = player.capitalTerritoryId!;
-    const productionBefore = game.production.length;
-    const levelBefore = game.territories[capital]!.economyLevel;
-
-    const markup = renderUi(<RightPanel />);
-    expect(markup).toContain('Управление');
-    expect(markup).toContain('Развивать');
-    act(() => {
-      const cards = [...document.querySelectorAll('button.unit-card')] as HTMLButtonElement[];
-      expect(cards.length).toBeGreaterThan(0);
-      const enabled = cards.find((card) => !card.disabled);
-      expect(enabled).toBeDefined();
-      enabled!.click();
+  it('has a single bottom panel with the three tabs', () => {
+    const game = createGame({ seed: 31337, playerCountryId: 'aquilonia', difficulty: 'normal' });
+    useGameStore.setState({
+      game,
+      selectedTerritoryId: game.countries.aquilonia!.capitalTerritoryId,
+      screen: 'game',
     });
-    expect(game.production.length).toBe(productionBefore + 1);
+    render(<BottomPanel />);
 
-    act(() => {
-      const buttons = [...document.querySelectorAll('button')] as HTMLButtonElement[];
-      const upgrade = buttons.find((button) => button.textContent?.includes('Развивать'));
-      expect(upgrade).toBeDefined();
-      upgrade!.click();
-    });
-    expect(game.territories[capital]!.economyLevel).toBe(Math.min(3, levelBefore + 1));
+    const tabs = [...container.querySelectorAll('.tab')].map((tab) => tab.textContent);
+    expect(tabs).toEqual(['Экономика', 'Оружие', 'Безопасность']);
+    expect(container.querySelectorAll('.bottom')).toHaveLength(1);
+
+    // Economy tab: the three profit structures.
+    expect(container.textContent).toContain('Завод');
+    expect(container.textContent).toContain('Город');
+    expect(container.textContent).toContain('Морской порт');
+    expect(container.textContent).toContain('₽');
+
+    act(() => buttonByText('Оружие').click());
+    expect(container.textContent).toContain('Ракетная установка');
+    expect(container.textContent).toContain('Завод сборки танков');
+    expect(container.textContent).toContain('Взлётная площадка');
+
+    act(() => buttonByText('Безопасность').click());
+    expect(container.textContent).toContain('ПВО');
+    expect(container.textContent).toContain('Баррикада');
+    expect(container.textContent).toContain('радиус');
   });
 
-  it('opens the send dialog and dispatches troops', () => {
-    const game = installGame();
-    const player = game.countries[game.playerCountryId]!;
-    const capital = player.capitalTerritoryId!;
-    game.territories[capital]!.garrison = makeArmy({ mbt: 4 });
-    act(() => {
-      renderUi(<GameScreen />);
+  it('places a chosen structure on the selected territory and charges for it', () => {
+    const game = createGame({ seed: 31337, playerCountryId: 'aquilonia', difficulty: 'normal' });
+    game.countries.aquilonia!.money = 5000;
+    useGameStore.setState({
+      game,
+      selectedTerritoryId: game.countries.aquilonia!.capitalTerritoryId,
+      screen: 'game',
+      buildingChoice: null,
     });
-    act(() => {
-      const buttons = [...document.querySelectorAll('button')] as HTMLButtonElement[];
-      const send = buttons.find((button) => button.textContent?.trim() === 'Перебросить');
-      expect(send).toBeDefined();
-      send!.click();
-    });
-    expect(document.body.innerHTML).toContain('Переброска войск');
+    render(<BottomPanel />);
 
+    act(() => buttonByText('Город').click());
+    expect(useGameStore.getState().buildingChoice).toBe('city');
+    expect(container.textContent).toContain('кликните по территории');
+
+    const moneyBefore = game.countries.aquilonia!.money;
+    let result = { ok: false } as { ok: boolean };
     act(() => {
-      const all = [...document.querySelectorAll('button')] as HTMLButtonElement[];
-      const allButton = all.find((button) => button.textContent?.trim() === 'Все');
-      allButton?.click();
+      result = useGameStore.getState().buildHere(useGameStore.getState().selectedTerritoryId!);
     });
-    act(() => {
-      const all = [...document.querySelectorAll('button')] as HTMLButtonElement[];
-      const confirm = all.find((button) => button.textContent?.trim() === 'Отправить приказ');
-      expect(confirm?.disabled).toBe(false);
-      confirm!.click();
-    });
-    expect(Object.values(game.groups).length).toBe(1);
+    expect(result.ok).toBe(true);
+    expect(game.countries.aquilonia!.money).toBeLessThan(moneyBefore);
+    const capital = game.territories[game.countries.aquilonia!.capitalTerritoryId!]!;
+    expect(capital.buildings.some((building) => building.kind === 'city')).toBe(true);
+
+    const notice = useGameStore.getState().notices.at(-1);
+    expect(notice?.text).toContain('Город');
   });
 
-  it('renders the battle report modal after a real fight', () => {
-    const game = installGame();
-    const playerId = game.playerCountryId;
-    const player = game.countries[playerId]!;
-    const source = player.capitalTerritoryId!;
-    const target = game.world.territories.find(
-      (territory) =>
-        game.territories[territory.id]!.owner !== playerId &&
-        !!findOrderPath(game, playerId, source, territory.id),
-    )!;
-    game.territories[source]!.garrison = makeArmy({ mbt: 6, ifv: 3 });
-    commandSendArmy(game, { countryId: playerId, from: source, to: target.id, army: makeArmy({ mbt: 6 }) });
-    let playerReport = null as (typeof game.battles)[number] | null;
-    for (let i = 0; i < 300 && !playerReport; i += 1) {
-      runTick(game);
-      playerReport =
-        game.battles.find(
-          (report) => report.attackerCountry === playerId || report.defenderCountry === playerId,
-        ) ?? null;
-    }
-    expect(playerReport).not.toBeNull();
-
-    useGameStore.setState({ battleReport: playerReport! });
-    const markup = renderUi(<BattleReportModal />);
-    expect(markup).toContain('Боевое донесение');
-    expect(markup).toContain('Раунд');
-    expect(markup).toContain(playerReport!.territoryName);
+  it('refuses to build without a selected structure', () => {
+    const game = createGame({ seed: 31337, playerCountryId: 'aquilonia', difficulty: 'normal' });
+    useGameStore.setState({ game, selectedTerritoryId: game.countries.aquilonia!.capitalTerritoryId });
+    const result = useGameStore.getState().buildHere(game.countries.aquilonia!.capitalTerritoryId!);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('здание');
   });
 
-  it('renders settings, help, saves and the send dialog', () => {
-    installGame();
-    const markup = renderUi(
-      <>
-        <SettingsDialog onClose={() => undefined} />
-        <HelpDialog onClose={() => undefined} />
-        <SavesDialog onClose={() => undefined} onDelete={() => undefined} />
-        <SendArmyDialog onClose={() => undefined} />
-      </>,
-    );
-    expect(markup).toContain('Настройки');
-    expect(markup).toContain('Обучение');
-    expect(markup).toContain('Сохранения');
-    expect(markup).toContain('Переброска войск');
-  });
-
-  it('renders victory and defeat screens', () => {
-    const game = installGame();
-    game.status = 'victory';
-    game.victory = {
-      kind: 'domination',
-      countryId: game.playerCountryId,
-      title: 'Мировое господство',
-      description: 'Все территории под контролем.',
-    };
-    const markup = renderUi(<VictoryModal />);
-    expect(markup).toContain('Победа');
-    expect(markup).toContain('Мировое господство');
-
-    act(() => root?.unmount());
-    root = null;
-    container?.remove();
-    game.status = 'defeat';
-    useGameStore.setState({ revision: 12 });
-    const defeat = renderUi(<VictoryModal />);
-    expect(defeat).toContain('Поражение');
-  });
-
-  it('shows foreign territory actions for hostile land', () => {
-    const game = installGame('hard');
-    const playerId = game.playerCountryId;
-    const foreign = game.world.territories.find(
-      (territory) => game.territories[territory.id]!.owner !== playerId,
-    )!;
-    useGameStore.setState({ selectedTerritoryId: foreign.id });
-    const markup = renderUi(
-      <>
-        <RightPanel />
-        <BottomBar onToggleLeft={() => undefined} onToggleRight={() => undefined} />
-      </>,
-    );
-    expect(markup).toContain(foreign.name);
-    expect(markup).toContain('Атаковать');
-    expect(markup).toContain('Оборона');
-  });
-
-  it('keeps working through a policy tick loop and re-renders', () => {
-    const game = installGame();
-    const player = game.countries[game.playerCountryId]!;
-    player.resources = { money: 3000, metal: 3000, oil: 3000, energy: 3000 };
-    act(() => {
-      commandQueueUnit(game, {
-        countryId: player.id,
-        territoryId: player.capitalTerritoryId!,
-        unit: 'apc',
-      });
-      commandUpgradeEconomy(game, { countryId: player.id, territoryId: player.capitalTerritoryId! });
-      for (let i = 0; i < 40; i += 1) runTick(game);
-      useGameStore.setState({ revision: 20 });
+  it('shows the army and the recruit action on an own territory', () => {
+    const game = createGame({ seed: 31337, playerCountryId: 'aquilonia', difficulty: 'normal' });
+    useGameStore.setState({
+      game,
+      selectedTerritoryId: game.countries.aquilonia!.capitalTerritoryId,
+      buildingChoice: null,
     });
-    const markup = renderUi(<LeftPanel />);
-    expect(markup).toContain('Армия');
-    expect(markup).toContain('Гарнизоны');
-    expect(markup).toContain('Производство');
-    // the queued APC finished during the tick loop and joined the garrison
-    expect(game.production.filter((item) => item.country === player.id).length).toBe(0);
-    act(() => {
-      findButton('Экономика')?.click();
-    });
-    expect(document.body.innerHTML).toContain('Инфраструктура');
+    render(<BottomPanel />);
+    expect(container.textContent).toContain('Армия');
+    expect(container.textContent).toContain('Оборона');
+    expect(buttonByText('Призвать').disabled).toBe(false);
+
+    const capital = game.territories[game.countries.aquilonia!.capitalTerritoryId!]!;
+    const armyBefore = capital.army;
+    act(() => buttonByText('Призвать').click());
+    expect(capital.army).toBeGreaterThan(armyBefore);
   });
 
-  it('renders the empty selection state and tutorial steps', () => {
-    installGame();
-    useGameStore.setState({ selectedTerritoryId: null, tutorialStep: 2 });
-    const markup = renderUi(
-      <>
-        <RightPanel />
-        <Tutorial />
-      </>,
-    );
-    expect(markup).toContain('Кликните по региону');
-    expect(markup).toContain('Обучение');
+  it('offers war and peace on foreign territories', () => {
+    const game = createGame({ seed: 31337, playerCountryId: 'aquilonia', difficulty: 'normal' });
+    const foreign = Object.values(game.territories).find((t) => t.owner === 'draconia')!;
+    useGameStore.setState({ game, selectedTerritoryId: foreign.id, buildingChoice: null });
+    render(<BottomPanel />);
+    expect(container.textContent).toContain('Дракония');
+    expect(() => buttonByText('Призвать')).toThrow();
+
+    act(() => buttonByText('Объявить войну').click());
+    expect(game.countries.aquilonia!.warWith).toContain('draconia');
+    expect(game.countries.draconia!.warWith).toContain('aquilonia');
+    expect(container.textContent).toContain('война');
+
+    act(() => buttonByText('Мир').click());
+    expect(game.countries.aquilonia!.warWith).not.toContain('draconia');
+  });
+
+  it('explains the rules from the menu', () => {
+    render(<MainMenu />);
+    act(() => buttonByText('Как играть').click());
+    expect(container.textContent).toContain('Жизни');
+    expect(container.textContent).toContain('клетк');
   });
 });

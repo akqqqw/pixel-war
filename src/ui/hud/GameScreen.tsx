@@ -1,33 +1,23 @@
-import { useEffect, useRef } from 'react';
-import { useGameStore } from '@/store/gameStore';
+import { useEffect, useRef, useState } from 'react';
 import { createPhaserGame } from '@/game/PhaserGame';
-import { useUiStore } from '@/ui/state/uiStore';
+import { useGameStore } from '@/store/gameStore';
 import { TopBar } from '@/ui/hud/TopBar';
-import { LeftPanel } from '@/ui/hud/LeftPanel';
-import { RightPanel } from '@/ui/hud/RightPanel';
-import { BottomBar } from '@/ui/hud/BottomBar';
-import { MapOverlay } from '@/ui/hud/MapOverlay';
-import { EventToasts } from '@/ui/hud/EventToasts';
-import { Tutorial } from '@/ui/hud/Tutorial';
-import { BattleReportModal } from '@/ui/hud/BattleReportModal';
+import { BottomPanel } from '@/ui/hud/BottomPanel';
 import { VictoryModal } from '@/ui/hud/VictoryModal';
-import { SendArmyDialog } from '@/ui/hud/SendArmyDialog';
-import { HelpDialog, SavesDialog, SettingsDialog } from '@/ui/dialogs/Dialogs';
-import { useGameSnapshot } from '@/ui/helpers/game';
+import { MenuDialog } from '@/ui/hud/MenuDialog';
+import { HelpDialog } from '@/ui/hud/HelpDialog';
+import { Toasts } from '@/ui/hud/Toasts';
 
 export function GameScreen() {
-  useGameSnapshot();
-  const leftOpen = useUiStore((state) => state.leftOpen);
-  const rightOpen = useUiStore((state) => state.rightOpen);
-  const toggleLeft = useUiStore((state) => state.toggleLeft);
-  const toggleRight = useUiStore((state) => state.toggleRight);
-  const closeDrawers = useUiStore((state) => state.closeDrawers);
-  const dialog = useUiStore((state) => state.dialog);
-  const closeDialog = useUiStore((state) => state.closeDialog);
-  const deleteSave = useGameStore((state) => state.deleteSave);
-  const hostRef = useRef<HTMLDivElement>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const advance = useGameStore((state) => state.advance);
+  const setSpeed = useGameStore((state) => state.setSpeed);
+  const saveGame = useGameStore((state) => state.saveGame);
+  const exitToMenu = useGameStore((state) => state.exitToMenu);
+  const status = useGameStore((state) => state.game?.status ?? 'playing');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
-  // Phaser owns the map canvas; React never re-creates it between game ticks.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return undefined;
@@ -36,7 +26,6 @@ export function GameScreen() {
       typeof ResizeObserver !== 'undefined'
         ? new ResizeObserver(() => {
             phaser.scale.refresh();
-            return undefined;
           })
         : null;
     observer?.observe(host);
@@ -51,79 +40,72 @@ export function GameScreen() {
     };
   }, []);
 
-  // Real-time simulation loop, independent from React rendering.
+  // Real-time loop: the store turns elapsed time into whole game ticks.
   useEffect(() => {
     let frame = 0;
     let last = performance.now();
     const loop = (now: number): void => {
-      const delta = Math.min(now - last, 400);
+      const delta = now - last;
       last = now;
-      useGameStore.getState().advance(delta);
+      advance(delta);
       frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, []);
+  }, [advance]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
-      const store = useGameStore.getState();
+      if (event.target instanceof HTMLInputElement) return;
       if (event.code === 'Space') {
         event.preventDefault();
-        if (!store.game) return;
-        store.setSpeed(store.game.speed === 0 ? 1 : 0);
-      } else if (event.key === '1') {
-        store.setSpeed(1);
-      } else if (event.key === '2') {
-        store.setSpeed(2);
-      } else if (event.key === '3') {
-        store.setSpeed(4);
-      } else if (event.key === 'Escape') {
-        closeDrawers();
-        if (useUiStore.getState().dialog) closeDialog();
-      } else if (event.key.toLowerCase() === 's' && event.ctrlKey) {
+        const game = useGameStore.getState().game;
+        if (game) setSpeed(game.speed === 0 ? 1 : 0);
+      } else if (event.key === '1') setSpeed(1);
+      else if (event.key === '2') setSpeed(2);
+      else if (event.key === '3') setSpeed(4);
+      else if (event.key === 'Escape') {
+        useGameStore.getState().chooseBuilding(null);
+        useGameStore.getState().cancelTransfer();
+        setMenuOpen(false);
+        setHelpOpen(false);
+      } else if (event.key.toLowerCase() === 's' && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
-        void store.saveGame();
+        void saveGame();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [closeDialog, closeDrawers]);
+  }, [saveGame, setSpeed]);
 
   return (
     <div className="game">
-      <TopBar onToggleLeft={toggleLeft} onToggleRight={toggleRight} />
-      <div className="game-body">
-        <aside className={`game-body__side ${leftOpen ? 'game-body__side--open' : ''}`}>
-          <LeftPanel />
-        </aside>
-
-        <div className="map-column">
-          <div className="map-wrap" ref={hostRef} />
-          <MapOverlay />
-          <EventToasts />
-          <Tutorial />
+      <TopBar onMenu={() => setMenuOpen(true)} />
+      <div className="game__map">
+        <div ref={hostRef} className="game__canvas" />
+        <div className="game__legend">
+          <span>
+            <i className="legend__swatch" style={{ background: '#9fd0ff' }} /> выбранная территория
+          </span>
+          <span>колесо/щипок — масштаб, перетаскивание — карта</span>
+          <button type="button" className="btn btn--ghost btn--sm" onClick={() => setHelpOpen(true)}>
+            Как играть
+          </button>
         </div>
-
-        <aside className={`game-body__side game-body__side--right ${rightOpen ? 'game-body__side--open' : ''}`}>
-          <RightPanel />
-        </aside>
       </div>
-      <BottomBar onToggleLeft={toggleLeft} onToggleRight={toggleRight} />
-
-      <BattleReportModal />
-      <VictoryModal />
-
-      {dialog?.type === 'send' && (
-        <SendArmyDialog initialFrom={dialog.from} initialTo={dialog.to} onClose={closeDialog} />
+      <BottomPanel />
+      <Toasts />
+      {menuOpen && (
+        <MenuDialog
+          onClose={() => setMenuOpen(false)}
+          onExit={() => {
+            setMenuOpen(false);
+            exitToMenu();
+          }}
+        />
       )}
-      {dialog?.type === 'settings' && <SettingsDialog onClose={closeDialog} />}
-      {dialog?.type === 'help' && <HelpDialog onClose={closeDialog} />}
-      {dialog?.type === 'saves' && (
-        <SavesDialog onClose={closeDialog} onDelete={(slot) => void deleteSave(slot)} />
-      )}
+      {helpOpen && <HelpDialog onClose={() => setHelpOpen(false)} />}
+      {status !== 'playing' && <VictoryModal />}
     </div>
   );
 }

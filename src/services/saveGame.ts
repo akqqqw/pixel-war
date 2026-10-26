@@ -1,5 +1,5 @@
 import type { GameState } from '@/core/state/types';
-import { deserializeGame, serializeGame, type SerializedGame } from '@/core/save/serialization';
+import { deserializeGame, serializeGame } from '@/core/save/serialization';
 
 const DB_NAME = 'pixel-war';
 const DB_VERSION = 1;
@@ -17,7 +17,8 @@ export interface SaveMeta {
 }
 
 interface SaveRecord extends SaveMeta {
-  data: SerializedGame;
+  /** JSON produced by serializeGame — stored as text so the schema stays explicit. */
+  data: string;
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
