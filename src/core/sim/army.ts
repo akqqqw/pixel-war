@@ -1,5 +1,5 @@
 import { BALANCE } from '@/core/sim/balance';
-import { regionArmy } from '@/core/sim/effects';
+import { regionArmyOf } from '@/core/sim/effects';
 import { pushEvent } from '@/core/sim/events';
 import type { GameState } from '@/core/state/types';
 import { countryIndexOf } from '@/core/state/types';
@@ -74,7 +74,7 @@ export function mobilizeMax(state: GameState, countryId: CountryId, regionId: Te
   const byAction = Math.floor(people * BALANCE.mobilizeSharePerAction);
   const byGarrison = Math.max(
     0,
-    Math.floor(region.population * BALANCE.garrisonRatio - regionArmy(state, regionId)),
+    Math.floor(region.population * BALANCE.garrisonRatio - regionArmyOf(state, regionId, countryId)),
   );
   const byMoney = Math.floor(country.money / BALANCE.mobilizeCostPerSoldier);
   const byCooldown =
@@ -134,7 +134,7 @@ export function transferArmy(
   if (!fromStatic?.neighbors.includes(toRegionId)) return fail('Регионы не граничат.');
   const count = Math.floor(amount);
   if (count <= 0) return fail('Укажите количество.');
-  const available = regionArmy(state, fromRegionId);
+  const available = regionArmyOf(state, fromRegionId, countryId);
   if (count > available) return fail('В регионе нет столько солдат.');
 
   let left = count;

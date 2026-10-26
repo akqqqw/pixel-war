@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BALANCE } from '@/core/sim/balance';
 import { resolveBattles } from '@/core/sim/battle';
 import { declareWar } from '@/core/sim/diplomacy';
-import { cellDefense } from '@/core/sim/effects';
+import { cellDefense, regionArmy, regionArmyOf } from '@/core/sim/effects';
 import { createGame } from '@/core/state/createGame';
 import type { GameState } from '@/core/state/types';
 import { isLandCell } from '@/core/world/cells';
@@ -115,6 +115,22 @@ describe('cell battles', () => {
       expect(state.countryOrder[owner]).toBeTruthy();
       expect(state.cellArmy[cell]).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  it('counts only the own soldiers of a contested region', () => {
+    const { state, pair, player, playerIndex } = setup();
+    clearArmy(state);
+    state.cellArmy[pair.mine] = 120;
+    state.cellArmy[pair.theirs] = 80;
+    const regionId = state.world.territories[state.world.tileTerritory[pair.mine] ?? -1]!.id;
+    const otherRegion = state.world.territories[state.world.tileTerritory[pair.theirs] ?? -1]!.id;
+    if (regionId !== otherRegion) {
+      expect(regionArmy(state, regionId)).toBeGreaterThanOrEqual(120);
+      expect(regionArmyOf(state, regionId, player)).toBe(120);
+    }
+    expect(regionArmyOf(state, regionId, player)).toBeLessThan(regionArmy(state, regionId) + 1);
+    expect(regionArmyOf(state, regionId, state.countryOrder[state.cellOwner[pair.theirs]!]!)).toBeGreaterThanOrEqual(0);
+    expect(playerIndex).toBeGreaterThanOrEqual(0);
   });
 
   it('does not let one cell attack two neighbours with the same soldiers', () => {

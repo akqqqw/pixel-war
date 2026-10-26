@@ -7,7 +7,7 @@ import {
   areAtWar,
   cellDefense,
   countryRegions,
-  regionArmy,
+  regionArmyOf,
   territoryShare,
 } from '@/core/sim/effects';
 import { activeOffensive, startOffensive, stopOffensive } from '@/core/sim/orders';
@@ -108,7 +108,7 @@ function tryMobilize(state: GameState, countryId: CountryId, profile: AiProfile)
   // A country at war needs a real field army, not a token garrison.
   const target = (country.warWith.length > 0 ? 600 : 260) + regions.length * 260;
   if (country.army >= target) return;
-  const borders = ownedBorders(state, countryId).sort((a, b) => regionArmy(state, a.id) - regionArmy(state, b.id));
+  const borders = ownedBorders(state, countryId).sort((a, b) => regionArmyOf(state, a.id, countryId) - regionArmyOf(state, b.id, countryId));
   const candidates = borders.length > 0 ? borders : regions;
   const region = candidates[0];
   if (!region) return;
@@ -184,7 +184,7 @@ function tryOffensive(state: GameState, countryId: CountryId, profile: AiProfile
 
   const target = findTarget(state, countryId);
   if (!target) return;
-  const force = regionArmy(state, target.regionId);
+  const force = regionArmyOf(state, target.regionId, countryId);
   // The whole region marches, so compare the region army with the defence of
   // the chosen cell instead of the single stack that happens to touch it.
   if (force * profile.offensiveShare < target.defense * profile.warRatio * 2) return;

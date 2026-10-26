@@ -1,6 +1,6 @@
 import { BALANCE } from '@/core/sim/balance';
 import { declareWar } from '@/core/sim/diplomacy';
-import { areAtWar, cellDefense, regionArmy } from '@/core/sim/effects';
+import { areAtWar, cellDefense, regionArmyOf } from '@/core/sim/effects';
 import { fail, OK, type ActionResult } from '@/core/sim/result';
 import type { GameState, OffensiveOrder } from '@/core/state/types';
 import { countryIndexOf } from '@/core/state/types';
@@ -89,7 +89,7 @@ export function startOffensive(
   if (frontCells(state, countryIndex, dist) === 0) return fail('К этой клетке нет сухопутного фронта.');
 
   const wanted = Math.max(0.1, Math.min(1, share));
-  const army = regionArmy(state, sourceRegionId);
+  const army = regionArmyOf(state, sourceRegionId, countryId);
   const committed = Math.floor(army * wanted);
   if (committed < 1) return fail('В регионе нет армии для наступления.');
 

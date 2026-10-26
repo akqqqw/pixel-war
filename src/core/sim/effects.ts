@@ -167,6 +167,19 @@ export function regionArmy(state: GameState, regionId: TerritoryId): number {
   return total;
 }
 
+/** Soldiers of one country standing inside a region (enemies are not counted). */
+export function regionArmyOf(state: GameState, regionId: TerritoryId, countryId: CountryId): number {
+  const territory = state.world.territories.find((entry) => entry.id === regionId);
+  const index = countryIndexOf(state, countryId);
+  if (!territory || index < 0) return 0;
+  let total = 0;
+  for (const cell of territory.tiles) {
+    if ((state.cellOwner[cell] ?? -1) !== index) continue;
+    total += state.cellArmy[cell] ?? 0;
+  }
+  return total;
+}
+
 export function countryArmy(state: GameState, countryId: CountryId): number {
   let total = 0;
   for (let cell = 0; cell < state.cellArmy.length; cell += 1) {

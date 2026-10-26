@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { regionArmy } from '@/core/sim/effects';
+import { regionArmyOf } from '@/core/sim/effects';
 import { useGameStore, playerOffensive } from '@/store/gameStore';
 import { formatMoney } from '@/ui/helpers/format';
 
@@ -22,7 +22,7 @@ export function OrderPanel() {
   if (!game) return null;
 
   if (draft) {
-    const available = regionArmy(game, draft.sourceRegionId);
+    const available = regionArmyOf(game, draft.sourceRegionId, game.playerCountryId);
     const send = Math.floor((available * share) / 100);
     return (
       <div className="order-panel">
