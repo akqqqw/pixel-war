@@ -1,8 +1,8 @@
 import { useGameStore } from '@/store/gameStore';
 import { Modal } from '@/ui/components/Modal';
 import { formatGameDate } from '@/core/time/gameDate';
-import { ownedCount, playerCountry, playerTotals } from '@/ui/helpers/game';
 import { formatPopulation } from '@/ui/helpers/format';
+import { playerCountry, playerStats } from '@/ui/helpers/game';
 
 export function VictoryModal() {
   const game = useGameStore((state) => state.game);
@@ -11,7 +11,7 @@ export function VictoryModal() {
   const country = playerCountry(game);
   if (!game || game.status === 'playing') return null;
   const won = game.status === 'victory';
-  const totals = playerTotals(game);
+  const stats = playerStats(game);
 
   return (
     <Modal
@@ -44,22 +44,20 @@ export function VictoryModal() {
           <dd>{formatGameDate(game.tick)}</dd>
         </div>
         <div>
-          <dt>Территории</dt>
-          <dd>
-            {country ? ownedCount(game, country.id) : 0} / {game.world.territories.length}
-          </dd>
+          <dt>Земли</dt>
+          <dd>{Math.round(stats.share * 1000) / 10}%</dd>
         </div>
         <div>
           <dt>Население</dt>
-          <dd>{formatPopulation(totals.population)}</dd>
+          <dd>{formatPopulation(stats.population)}</dd>
         </div>
         <div>
-          <dt>Захвачено территорий</dt>
+          <dt>Захвачено клеток</dt>
           <dd>{country?.stats.captured ?? 0}</dd>
         </div>
         <div>
           <dt>Построено зданий</dt>
-          <dd>{country?.stats.buildings ?? 0}</dd>
+          <dd>{country?.stats.built ?? 0}</dd>
         </div>
       </dl>
     </Modal>

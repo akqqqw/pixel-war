@@ -1,214 +1,262 @@
-import { BUILDINGS, type BuildingKind } from '@/core/buildings/buildings';
-import type { GameState, TerritoryState } from '@/core/state/types';
-import type { TerritoryId } from '@/core/types';
-import type { WorldData } from '@/core/world/world';
-import { BALANCE } from '@/core/sim/balance';
-import { TERRAIN_INFO, type TerrainCode } from '@/core/world/terrain';
+import {
+  BALANCE,
+} from '@/core/sim/balance';
+import {
+  BUILDINGS,
+  buildingDamage,
+  buildingDefense,
+  buildingIntercept,
+  buildingPopulation,
+  buildingRadius,
+  buildingIncome,
+  type BuildingKind,
+} from '@/core/buildings/buildings';
+import type { BuildingInstance, CountryState, GameState, RegionState } from '@/core/state/types';
+import { countryIndexOf } from '@/core/state/types';
+import type { CountryId, TerritoryId } from '@/core/types';
+import { cellTerrainDefense, cellX, cellY, isLandCell } from '@/core/world/cells';
 
-export interface TerritoryEffects {
-  /** Money per tick from buildings (without tax and upkeep). */
-  buildingIncome: number;
-  /** Population per tick from buildings. */
-  populationPerTick: number;
-  /** Army per tick from buildings. */
-  armyPerTick: number;
-  /** Population capacity (thousands). */
-  populationCap: number;
-  /** Defence bonus inside the territory, 0..1. */
-  defense: number;
-  /** Attack bonus for pushes launched from this territory, 0..1. */
-  attack: number;
-  hasAA: boolean;
-  hasMissile: boolean;
-  buildings: number;
-}
+/** Pure queries shared by the simulation, the AI and the interface. */
 
-export function terrainDefense(state: GameState, territoryId: TerritoryId): number {
-  const staticTerritory = state.world.territories.find((t) => t.id === territoryId);
-  if (!staticTerritory) return BALANCE.terrainDefense;
-  return TERRAIN_INFO[staticTerritory.dominantTerrain as TerrainCode]?.defenseBonus ?? 1;
-}
-
-export function countKind(territory: TerritoryState, kind: BuildingKind): number {
-  let count = 0;
-  for (const building of territory.buildings) if (building.kind === kind) count += 1;
-  return count;
-}
-
-/** Aggregated effect of all buildings on a territory. */
-export function territoryEffects(territory: TerritoryState): TerritoryEffects {
-  const result: TerritoryEffects = {
-    buildingIncome: 0,
-    populationPerTick: 0,
-    armyPerTick: 0,
-    populationCap: BALANCE.basePopulationCap,
-    defense: 0,
-    attack: 0,
-    hasAA: false,
-    hasMissile: false,
-    buildings: territory.buildings.length,
-  };
-  for (const building of territory.buildings) {
-    const def = BUILDINGS[building.kind];
-    if (!def) continue;
-    result.buildingIncome += def.income ?? 0;
-    result.populationPerTick += def.population ?? 0;
-    result.armyPerTick += def.army ?? 0;
-    if (def.kind === 'city') result.populationCap += BALANCE.cityPopulationCap;
-    if (def.kind === 'aa') {
-      result.defense += def.defense ?? 0;
-      result.hasAA = true;
-    }
-    if (def.kind === 'barricade') result.defense += def.defense ?? 0;
-    if (def.kind === 'airfield') result.attack += def.attack ?? 0;
-    if (def.kind === 'missile') result.hasMissile = true;
-  }
-  return result;
-}
-
-/** Income before upkeep: tax plus buildings. */
-export function territoryIncome(_state: GameState, territory: TerritoryState): number {
-  const effects = territoryEffects(territory);
-  return territory.population * BALANCE.taxRate + effects.buildingIncome;
-}
-
-export function countryIncome(state: GameState, countryId: string): number {
-  let income = 0;
-  let army = 0;
-  for (const territory of Object.values(state.territories)) {
-    if (territory.owner !== countryId) continue;
-    income += territoryIncome(state, territory);
-    army += territory.army;
-  }
-  income -= army * BALANCE.armyUpkeep;
-  return Math.round(income * 10) / 10;
-}
-
-/**
- * Defence bonus from AA batteries and barricades whose radius of action covers
- * the centre of this territory. Structures of any own territory count, so a
- * battery built one region behind the front still protects the border.
- */
-interface Bounds {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-}
-
-const boundsCache = new WeakMap<object, Map<string, Bounds>>();
-
-/** Bounding box of a territory in tiles — cached because the map never moves. */
-function territoryBounds(world: WorldData, territoryId: TerritoryId): Bounds | null {
-  let perWorld = boundsCache.get(world);
-  if (!perWorld) {
-    perWorld = new Map();
-    boundsCache.set(world, perWorld);
-  }
-  const cached = perWorld.get(territoryId);
-  if (cached) return cached;
-  const staticTerritory = world.territories.find((t) => t.id === territoryId);
-  if (!staticTerritory) return null;
-  const width = world.width;
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const tile of staticTerritory.tiles) {
-    const x = tile % width;
-    const y = Math.floor(tile / width);
-    if (x < minX) minX = x;
-    if (y < minY) minY = y;
-    if (x > maxX) maxX = x;
-    if (y > maxY) maxY = y;
-  }
-  const bounds: Bounds = { minX, minY, maxX, maxY };
-  perWorld.set(territoryId, bounds);
-  return bounds;
-}
-
-export function securityDefense(state: GameState, territoryId: TerritoryId): number {
-  const target = state.territories[territoryId];
-  if (!target || !target.owner) return 0;
-  const world = state.world;
-  const bounds = territoryBounds(world, territoryId);
-  if (!bounds) return 0;
-  const width = world.width;
-  let bonus = 0;
-  for (const territory of Object.values(state.territories)) {
-    if (territory.owner !== target.owner) continue;
-    for (const building of territory.buildings) {
-      const def = BUILDINGS[building.kind];
-      if (!def?.radius || !def.defense) continue;
-      const bx = building.tile % width;
-      const by = Math.floor(building.tile / width);
-      const dx = Math.max(bounds.minX - bx, 0, bx - bounds.maxX);
-      const dy = Math.max(bounds.minY - by, 0, by - bounds.maxY);
-      if (Math.max(dx, dy) > def.radius) continue;
-      bonus += def.defense;
-    }
-  }
-  return Math.min(BALANCE.maxSecurityDefense, bonus);
-}
-
-/**
- * Defence strength of a territory: its army, terrain and the people itself.
- * AA and barricades reinforce the value inside their radius of action.
- */
-export function defenseStrength(state: GameState, territoryId: TerritoryId): number {
-  const territory = state.territories[territoryId];
-  if (!territory) return 0;
-  const terrain = 1 + (terrainDefense(state, territoryId) - 1) * BALANCE.terrainDefenseWeight;
-  const security = securityDefense(state, territoryId);
-  const army = territory.army * BALANCE.defenseArmyWeight;
-  const people = territory.population * BALANCE.populationDefense;
-  return Math.round((army + people) * terrain * (1 + security) * 10) / 10;
-}
-
-/**
- * Attack strength of an army group sitting in `territoryId`. Airfields in the
- * territory and its direct neighbours add up to +50 %.
- */
-export function attackStrength(state: GameState, territoryId: TerritoryId): number {
-  const territory = state.territories[territoryId];
-  if (!territory || territory.army <= 0) return 0;
-  const staticTerritory = state.world.territories.find((t) => t.id === territoryId);
-  let attackBonus = 0;
-  const check = (id: TerritoryId | undefined): void => {
-    if (!id) return;
-    const other = state.territories[id];
-    if (!other || other.owner !== territory.owner) return;
-    for (const building of other.buildings) {
-      if (building.kind === 'airfield') attackBonus += BUILDINGS.airfield.attack ?? 0;
-    }
-  };
-  check(territoryId);
-  for (const neighbour of staticTerritory?.neighbors ?? []) check(neighbour);
-  return territory.army * (1 + Math.min(0.5, attackBonus));
-}
-
-/** True when the territory has at least one enemy neighbour. */
-export function isBorderTerritory(state: GameState, territoryId: TerritoryId): boolean {
-  const staticTerritory = state.world.territories.find((t) => t.id === territoryId);
-  const territory = state.territories[territoryId];
-  if (!staticTerritory || !territory) return false;
-  return staticTerritory.neighbors.some((id) => {
-    const other = state.territories[id];
-    return other && other.owner && other.owner !== territory.owner;
-  });
-}
-
-export function areAtWar(state: GameState, a: string | null, b: string | null): boolean {
+export function areAtWar(state: GameState, a: CountryId | null, b: CountryId | null): boolean {
   if (!a || !b || a === b) return false;
   return state.countries[a]?.warWith.includes(b) ?? false;
 }
 
-/** Living countries sorted by strength, used by AI and victory checks. */
-export function countryPower(state: GameState, countryId: string): number {
-  let power = 0;
-  for (const territory of Object.values(state.territories)) {
-    if (territory.owner !== countryId) continue;
-    power += territory.army + territory.population * 0.05 + territory.buildings.length * 2;
+export function buildingsOf(region: RegionState, kind?: BuildingKind): BuildingInstance[] {
+  return kind ? region.buildings.filter((building) => building.kind === kind) : region.buildings;
+}
+
+export function countBuildings(region: RegionState, kind: BuildingKind): number {
+  let count = 0;
+  for (const building of region.buildings) if (building.kind === kind) count += 1;
+  return count;
+}
+
+export function buildingAt(state: GameState, cell: number): BuildingInstance | null {
+  const region = regionOfCellState(state, cell);
+  if (!region) return null;
+  for (const building of region.buildings) if (building.cell === cell) return building;
+  return null;
+}
+
+export function regionOfCellState(state: GameState, cell: number): RegionState | null {
+  const index = state.world.tileTerritory[cell] ?? -1;
+  if (index < 0) return null;
+  const territory = state.world.territories[index];
+  if (!territory) return null;
+  return state.regions[territory.id] ?? null;
+}
+
+/** Iterates land cells of a square radius around `cell` (Chebyshev distance). */
+function forEachCellInRadius(
+  state: GameState,
+  cell: number,
+  radius: number,
+  visit: (other: number, distance: number) => void,
+): void {
+  const world = state.world;
+  const cx = cellX(world, cell);
+  const cy = cellY(world, cell);
+  const minX = Math.max(0, cx - radius);
+  const maxX = Math.min(world.width - 1, cx + radius);
+  const minY = Math.max(0, cy - radius);
+  const maxY = Math.min(world.height - 1, cy + radius);
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const other = y * world.width + x;
+      if (!isLandCell(world, other)) continue;
+      const distance = Math.max(Math.abs(x - cx), Math.abs(y - cy));
+      if (distance > radius) continue;
+      visit(other, distance);
+    }
   }
-  return power;
+}
+
+/**
+ * Rebuilds the fortification layers from the buildings. Barricade bonuses add
+ * up but never pass `maxFortDefense`; AA interception combines as independent
+ * chances and is capped by `maxInterceptChance` — overlapping radii therefore
+ * help, but cannot make a country invulnerable.
+ */
+export function recomputeFortification(state: GameState): void {
+  state.cellFort.fill(0);
+  state.cellAir.fill(0);
+  for (const region of Object.values(state.regions)) {
+    for (const building of region.buildings) {
+      const def = BUILDINGS[building.kind];
+      if (!def.radius) continue;
+      const radius = buildingRadius(building.kind, building.level);
+      const ownerIndex = countryIndexOf(state, region.owner);
+      if (ownerIndex < 0) continue;
+      const defense = def.defense ? buildingDefense(building.kind, building.level) : 0;
+      const intercept = def.intercept ? buildingIntercept(building.kind, building.level) : 0;
+      forEachCellInRadius(state, building.cell, radius, (other) => {
+        if (state.cellOwner[other] !== ownerIndex) return;
+        if (defense > 0) {
+          state.cellFort[other] = Math.min(
+            BALANCE.maxFortDefense,
+            (state.cellFort[other] ?? 0) + defense,
+          );
+        }
+        if (intercept > 0) {
+          const current = state.cellAir[other] ?? 0;
+          const combined = 1 - (1 - current) * (1 - intercept);
+          state.cellAir[other] = Math.min(BALANCE.maxInterceptChance, combined);
+        }
+      });
+    }
+  }
+}
+
+/** Airfield bonus for pushes launched from `cell`, 0..maxAirfieldAttackBonus. */
+export function airfieldAttackBonus(state: GameState, cell: number): number {
+  const owner = state.cellOwner[cell];
+  if (owner === undefined || owner < 0) return 0;
+  let bonus = 0;
+  for (const region of Object.values(state.regions)) {
+    if (countryIndexOf(state, region.owner) !== owner) continue;
+    for (const building of region.buildings) {
+      if (building.kind !== 'airfield') continue;
+      const radius = buildingRadius(building.kind, building.level);
+      const dx = Math.abs(cellX(state.world, building.cell) - cellX(state.world, cell));
+      const dy = Math.abs(cellY(state.world, building.cell) - cellY(state.world, cell));
+      if (Math.max(dx, dy) > radius) continue;
+      bonus += BUILDINGS.airfield.attack ?? 0;
+    }
+  }
+  return Math.min(BALANCE.maxAirfieldAttackBonus, bonus);
+}
+
+export function tankAttackBonus(country: CountryState): number {
+  return Math.min(BALANCE.maxTankAttackBonus, country.tanks * BALANCE.tankAttackBonus);
+}
+
+export function tankDefenseBonus(country: CountryState): number {
+  return Math.min(BALANCE.maxTankDefenseBonus, country.tanks * BALANCE.tankDefenseBonus);
+}
+
+/** Defence of a single cell: garrison, militia, terrain, barricades and tanks. */
+export function cellDefense(state: GameState, cell: number): number {
+  const owner = state.cellOwner[cell] ?? -1;
+  if (owner < 0) return 0;
+  const country = state.countries[state.countryOrder[owner]!];
+  if (!country) return 0;
+  const army = state.cellArmy[cell] ?? 0;
+  const fort = 1 + (state.cellFort[cell] ?? 0);
+  const terrain = cellTerrainDefense(state.world, cell, BALANCE.terrainWeight);
+  const militia = BALANCE.cellMilitiaDefense * terrain * fort;
+  const soldiers = army * (1 + tankDefenseBonus(country)) * fort * terrain;
+  return soldiers + militia;
+}
+
+/** Defence number shown in the interface for a whole region. */
+export function regionDefense(state: GameState, regionId: TerritoryId): number {
+  const territory = state.world.territories.find((entry) => entry.id === regionId);
+  if (!territory) return 0;
+  let total = 0;
+  for (const cell of territory.tiles) total += cellDefense(state, cell);
+  return Math.round(total);
+}
+
+export function regionArmy(state: GameState, regionId: TerritoryId): number {
+  const territory = state.world.territories.find((entry) => entry.id === regionId);
+  if (!territory) return 0;
+  let total = 0;
+  for (const cell of territory.tiles) total += state.cellArmy[cell] ?? 0;
+  return total;
+}
+
+export function countryArmy(state: GameState, countryId: CountryId): number {
+  let total = 0;
+  for (let cell = 0; cell < state.cellArmy.length; cell += 1) {
+    const owner = state.cellOwner[cell] ?? -1;
+    if (owner < 0) continue;
+    if (state.countryOrder[owner] !== countryId) continue;
+    total += state.cellArmy[cell] ?? 0;
+  }
+  return total;
+}
+
+export function countryPopulation(state: GameState, countryId: CountryId): number {
+  let total = 0;
+  for (const region of Object.values(state.regions)) {
+    if (region.owner === countryId) total += region.population;
+  }
+  return total;
+}
+
+export function countryRegions(state: GameState, countryId: CountryId): RegionState[] {
+  return Object.values(state.regions).filter((region) => region.owner === countryId);
+}
+
+/** Share of the land map one country controls, 0..1. */
+export function territoryShare(state: GameState, countryId: CountryId): number {
+  const index = countryIndexOf(state, countryId);
+  if (index < 0) return 0;
+  let owned = 0;
+  let land = 0;
+  for (let cell = 0; cell < state.cellOwner.length; cell += 1) {
+    const owner = state.cellOwner[cell] ?? -1;
+    if (!isLandCell(state.world, cell)) continue;
+    land += 1;
+    if (owner === index) owned += 1;
+  }
+  return land === 0 ? 0 : owned / land;
+}
+
+/** Population capacity of a region, raised by cities. */
+export function populationCap(region: Pick<RegionState, 'buildings'>): number {
+  let cap = BALANCE.basePopulationCap;
+  for (const building of region.buildings) {
+    if (building.kind !== 'city') continue;
+    cap += BALANCE.cityPopulationCap * Math.pow(1.5, building.level - 1);
+  }
+  return Math.round(cap);
+}
+
+/** Income of a region per second: taxes plus buildings. */
+export function regionIncome(region: RegionState): number {
+  let income = region.population * BALANCE.taxPerCitizenPerSecond;
+  for (const building of region.buildings) {
+    if (BUILDINGS[building.kind].income) income += buildingIncome(building.kind, building.level);
+  }
+  return Math.round(income * 10) / 10;
+}
+
+/** Population the cities of a region add every second. */
+export function regionPopulationGrowth(region: Pick<RegionState, 'buildings'>): number {
+  let growth = BALANCE.basePopulationGrowth;
+  for (const building of region.buildings) {
+    if (building.kind !== 'city') continue;
+    growth += buildingPopulation('city', building.level);
+  }
+  return growth;
+}
+
+export function missileDamageOf(building: BuildingInstance): number {
+  return buildingDamage('missile', building.level);
+}
+
+export function airStrikeDamageOf(building: BuildingInstance): number {
+  return buildingDamage('airfield', building.level);
+}
+
+/** Regions of a country touching a region of another country. */
+export function borderRegions(state: GameState, countryId: CountryId): RegionState[] {
+  const out: RegionState[] = [];
+  for (const region of countryRegions(state, countryId)) {
+    const territory = state.world.territories.find((entry) => entry.id === region.id);
+    if (!territory) continue;
+    const isBorder = territory.neighbors.some((id) => {
+      const other = state.regions[id];
+      return other && other.owner && other.owner !== countryId;
+    });
+    if (isBorder) out.push(region);
+  }
+  return out;
+}
+
+export function livingCountries(state: GameState): CountryState[] {
+  return Object.values(state.countries).filter((country) => country.alive);
 }

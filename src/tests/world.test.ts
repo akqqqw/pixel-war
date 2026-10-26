@@ -74,27 +74,30 @@ describe('world generation', () => {
     expect(world.territories.some((t) => t.neighbors.length >= 3)).toBe(true);
   });
 
-  it('starts every country with territories, a capital and money', () => {
+  it('starts every country with regions, a capital and money', () => {
     const game = createGame({ seed: 77, playerCountryId: 'aquilonia', difficulty: 'normal' });
     for (const country of Object.values(game.countries)) {
       expect(country.alive).toBe(true);
       expect(country.money).toBeGreaterThan(0);
-      expect(country.capitalTerritoryId).toBeTruthy();
-      const capital = game.territories[country.capitalTerritoryId!];
-      expect(capital?.owner).toBe(country.id);
-      const owned = Object.values(game.territories).filter((t) => t.owner === country.id);
+      expect(country.capitalRegionId).toBeTruthy();
+      const owned = Object.values(game.regions).filter((region) => region.owner === country.id);
       expect(owned.length).toBeGreaterThan(0);
+      expect(owned.some((region) => region.id === country.capitalRegionId)).toBe(true);
     }
     expect(Object.values(game.countries).filter((c) => c.isPlayer)).toHaveLength(1);
     expect(game.countries[game.playerCountryId]!.isPlayer).toBe(true);
   });
 
-  it('paints every territory tile with its owner on the cell map', () => {
+  it('paints every cell of a region with its owner and puts soldiers on the borders', () => {
     const game = createGame({ seed: 77, playerCountryId: 'aquilonia', difficulty: 'normal' });
-    for (const territory of game.world.territories) {
-      const ownerIndex = game.countryOrder.indexOf(game.territories[territory.id]!.owner!);
+    for (const region of Object.values(game.regions)) {
+      const ownerIndex = game.countryOrder.indexOf(region.owner ?? '__none__');
       expect(ownerIndex).toBeGreaterThanOrEqual(0);
-      for (const tile of territory.tiles) expect(game.tileOwner[tile]).toBe(ownerIndex);
+      const territory = game.world.territories.find((entry) => entry.id === region.id)!;
+      for (const tile of territory.tiles) expect(game.cellOwner[tile]).toBe(ownerIndex);
     }
+    let soldiers = 0;
+    for (let cell = 0; cell < game.cellArmy.length; cell += 1) soldiers += game.cellArmy[cell] ?? 0;
+    expect(soldiers).toBeGreaterThan(0);
   });
 });

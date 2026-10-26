@@ -39,7 +39,7 @@ export function MenuDialog({ onClose, onExit }: MenuDialogProps) {
       <div className="menu-section">
         <div className="menu-section__title">Сохранения</div>
         {saves.length === 0 ? (
-          <p className="muted small">Пока нет сохранений. Автосохранение пишется каждые 40 игровых часов.</p>
+          <p className="muted small">Пока нет сохранений. Автосохранение пишется каждые 40 тиков.</p>
         ) : (
           <ul className="saves">
             {saves.slice(0, 6).map((save) => (
@@ -47,7 +47,7 @@ export function MenuDialog({ onClose, onExit }: MenuDialogProps) {
                 <div>
                   <div>{save.label}</div>
                   <div className="tiny muted">
-                    {formatGameDate(save.tick)} · земель {save.ownedTerritories}
+                    {formatGameDate(save.tick)} · клеток {save.ownedCells}
                   </div>
                 </div>
                 <div className="saves__actions">

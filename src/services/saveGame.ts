@@ -13,7 +13,7 @@ export interface SaveMeta {
   tick: number;
   countryId: string;
   difficulty: string;
-  ownedTerritories: number;
+  ownedCells: number;
 }
 
 interface SaveRecord extends SaveMeta {
@@ -50,7 +50,13 @@ function openDatabase(): Promise<IDBDatabase> {
 }
 
 function countOwned(state: GameState): number {
-  return Object.values(state.territories).filter((t) => t.owner === state.playerCountryId).length;
+  const index = state.countryOrder.indexOf(state.playerCountryId);
+  if (index < 0) return 0;
+  let count = 0;
+  for (let cell = 0; cell < state.cellOwner.length; cell += 1) {
+    if (state.cellOwner[cell] === index) count += 1;
+  }
+  return count;
 }
 
 export async function writeSave(
@@ -65,7 +71,7 @@ export async function writeSave(
     tick: state.tick,
     countryId: state.playerCountryId,
     difficulty: state.difficulty,
-    ownedTerritories: countOwned(state),
+    ownedCells: countOwned(state),
     data: serializeGame(state),
   };
   try {

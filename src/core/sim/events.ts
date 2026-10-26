@@ -6,7 +6,7 @@ export function pushEvent(
   kind: GameEvent['kind'],
   text: string,
   countryId?: string,
-  territoryId?: string,
+  cell?: number,
 ): void {
   const event: GameEvent = {
     id: `e${state.nextIds.event}`,
@@ -16,7 +16,7 @@ export function pushEvent(
   };
   state.nextIds.event += 1;
   if (countryId) event.countryId = countryId;
-  if (territoryId) event.territoryId = territoryId;
+  if (cell !== undefined) event.cell = cell;
   state.events.push(event);
   if (state.events.length > 120) state.events.splice(0, state.events.length - 120);
 }

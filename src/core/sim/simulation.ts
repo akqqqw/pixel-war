@@ -1,27 +1,36 @@
 import { runAi } from '@/core/ai/ai';
 import { BALANCE, TICK_MS } from '@/core/sim/balance';
+import { resolveBattles } from '@/core/sim/battle';
 import { runEconomyTick } from '@/core/sim/economy';
-import { stepFrontline } from '@/core/sim/frontline';
+import { advanceOffensives } from '@/core/sim/orders';
+import { refreshRegionOwnership, refreshTotals } from '@/core/sim/regions';
+import { resolveStrikes } from '@/core/sim/strikes';
 import { checkVictory } from '@/core/sim/victory';
-import { fireMissiles } from '@/core/sim/weapons';
 import type { GameState } from '@/core/state/types';
 
 export const MAX_TICKS_PER_FRAME = 8;
 
-/** One in-game hour. */
+/**
+ * One fixed logic tick (0.5 s of game time at ×1):
+ * economy → AI → army flow → cellular battle → strikes → regions → victory.
+ * Rendering runs at the frame rate and only reads the result.
+ */
 export function runTick(state: GameState): void {
   if (state.status !== 'playing') return;
   state.tick += 1;
   runEconomyTick(state);
   runAi(state);
-  fireMissiles(state);
-  stepFrontline(state);
+  advanceOffensives(state);
+  resolveBattles(state);
+  resolveStrikes(state);
+  refreshRegionOwnership(state);
+  refreshTotals(state);
   checkVictory(state);
 }
 
 /**
- * Turns real time into whole game ticks. Keeps a remainder so the simulation
- * stays smooth at ×1 and ×4 and never runs away after a tab switch.
+ * Converts real time into whole ticks. Speed ×1 runs two ticks per second,
+ * ×2 and ×4 run four and eight; a background tab never fast-forwards the war.
  */
 export class GameClock {
   private accumulator = 0;
@@ -32,13 +41,14 @@ export class GameClock {
     if (this.state.speed === 0 || this.state.status !== 'playing') return 0;
     const delta = Math.min(deltaMs, 5000);
     this.accumulator += delta;
-    const interval = TICK_MS / (this.state.speed === 1 ? 1 : this.state.speed === 2 ? 2 : 4);
+    const interval = TICK_MS / this.state.speed;
     let ticks = 0;
-    while (this.accumulator >= interval && ticks < MAX_TICKS_PER_FRAME * this.state.speed) {
+    const limit = MAX_TICKS_PER_FRAME * this.state.speed;
+    while (this.accumulator >= interval && ticks < limit) {
       this.accumulator -= interval;
       ticks += 1;
     }
-    if (ticks === MAX_TICKS_PER_FRAME * this.state.speed) this.accumulator = 0;
+    if (ticks === limit) this.accumulator = 0;
     for (let i = 0; i < ticks; i += 1) runTick(this.state);
     return ticks;
   }
@@ -46,11 +56,6 @@ export class GameClock {
   reset(): void {
     this.accumulator = 0;
   }
-}
-
-/** Monthly budget hint for the HUD (money per hour). */
-export function incomeHint(state: GameState, countryId: string): number {
-  return state.countries[countryId]?.income ?? 0;
 }
 
 export { BALANCE };

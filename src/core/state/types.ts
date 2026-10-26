@@ -2,7 +2,7 @@ import type { BuildingKind } from '@/core/buildings/buildings';
 import type { CountryId, TerritoryId } from '@/core/types';
 import type { WorldData } from '@/core/world/world';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export type GameSpeed = 0 | 1 | 2 | 4;
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -11,22 +11,29 @@ export type GameStatus = 'playing' | 'victory' | 'defeat';
 export interface BuildingInstance {
   id: string;
   kind: BuildingKind;
-  /** First map tile of the structure (used for drawing and radius checks). */
-  tile: number;
+  /** 1..3, every level multiplies the effect. */
+  level: number;
+  /** Map cell the structure stands on. */
+  cell: number;
+  /** Region of the cell, kept as a denormalised hint for the UI. */
+  regionId: TerritoryId;
+  /** Tick when the next missile / aircraft leaves the structure. */
+  readyAtTick: number;
 }
 
-export interface TerritoryState {
+export interface RegionState {
   id: TerritoryId;
+  /** Derived from the cell map every tick. */
   owner: CountryId | null;
-  /** Thousands of people. Grows with cities, feeds the army. */
+  /** Citizens, people. Grows with cities, feeds mobilisation and taxes. */
   population: number;
-  /** Abstract army points — no unit models, just numbers. */
-  army: number;
   buildings: BuildingInstance[];
-  /** Money per tick, refreshed by the economy tick. */
+  /** Soldiers standing in the region, refreshed every tick. */
+  army: number;
+  /** Gold per second the region generates before upkeep, refreshed every tick. */
   income: number;
-  /** Set when the territory was taken (for the map flash). */
   capturedAtTick: number | null;
+  lastMobilizeTick: number;
 }
 
 export interface CountryState {
@@ -36,34 +43,81 @@ export interface CountryState {
   color: string;
   accent: string;
   isPlayer: boolean;
-  capitalTerritoryId: TerritoryId | null;
   money: number;
+  /** Gold per second, refreshed every tick and shown in the HUD. */
   income: number;
-  /** True when the treasury is empty and the army is disbanding. */
-  unpaid: boolean;
+  /** Soldiers and citizens, refreshed every tick. */
+  army: number;
+  population: number;
+  /** Numeric military hardware — never drawn as sprites. */
+  tanks: number;
+  aircraft: number;
   alive: boolean;
-  /** AI only: 0..1 expansion appetite. */
-  aggression: number;
+  capitalRegionId: TerritoryId | null;
   warWith: CountryId[];
+  unpaid: boolean;
+  lastMobilizeTick: number;
+  tankProgress: number;
+  aircraftProgress: number;
   stats: {
-    buildings: number;
+    built: number;
     captured: number;
     lost: number;
     missiles: number;
+    airStrikes: number;
   };
+}
+
+/** A planned push: troops walk from the source region towards the target cell. */
+export interface OffensiveOrder {
+  id: string;
+  countryId: CountryId;
+  sourceRegionId: TerritoryId;
+  targetCell: number;
+  /** Share of the source region army committed to the push, 0.1..1. */
+  share: number;
+  committed: number;
+  /** Soldiers already delivered to the front, shown in the interface. */
+  delivered: number;
+  active: boolean;
+  /** Ticks without progress; the push picks a new border when it grows. */
+  stalledTicks: number;
+  startedAtTick: number;
+}
+
+export interface Strike {
+  id: string;
+  kind: 'missile' | 'air';
+  countryId: CountryId;
+  fromCell: number;
+  targetCell: number;
+  fireAtTick: number;
+  resolveAtTick: number;
+  /** Damage decided when the strike was launched. */
+  power: number;
 }
 
 export interface GameEvent {
   id: string;
   tick: number;
-  kind: 'build' | 'capture' | 'war' | 'peace' | 'missile' | 'victory' | 'defeat';
+  kind:
+    | 'build'
+    | 'upgrade'
+    | 'capture'
+    | 'war'
+    | 'peace'
+    | 'missile'
+    | 'air'
+    | 'mobilize'
+    | 'victory'
+    | 'defeat';
   text: string;
   countryId?: CountryId;
-  territoryId?: TerritoryId;
+  cell?: number;
 }
 
 export interface VictoryInfo {
-  kind: 'domination' | 'military';
+  kind: 'domination' | 'military' | 'defeat';
   countryId: CountryId;
   title: string;
   description: string;
@@ -72,25 +126,32 @@ export interface VictoryInfo {
 export interface GameState {
   version: number;
   seed: number;
-  difficulty: Difficulty;
   tick: number;
   speed: GameSpeed;
   status: GameStatus;
+  difficulty: Difficulty;
   playerCountryId: CountryId;
-  world: WorldData;
-  countries: Record<CountryId, CountryState>;
-  territories: Record<TerritoryId, TerritoryState>;
-  /** Country index per map tile, -1 for water/neutral. */
-  tileOwner: Int16Array;
-  /** `countryOrder[i]` is the country stored as index `i` in `tileOwner`. */
   countryOrder: CountryId[];
+  countries: Record<CountryId, CountryState>;
+  regions: Record<TerritoryId, RegionState>;
+  world: WorldData;
+
+  /** Owner index into `countryOrder`, -1 for water. */
+  cellOwner: Int16Array;
+  /** Soldiers standing on each land cell. */
+  cellArmy: Float32Array;
+  /** Barricade defence bonus per cell (0..BALANCE.maxFortDefense). */
+  cellFort: Float32Array;
+  /** AA interception chance per cell (0..BALANCE.maxInterceptChance). */
+  cellAir: Float32Array;
+
+  orders: OffensiveOrder[];
+  strikes: Strike[];
   events: GameEvent[];
-  nextIds: { building: number; event: number };
-  /** Tick when each missile launcher may fire again, keyed by building id. */
-  missileReady: Record<string, number>;
   victory: VictoryInfo | null;
-  /** Number of cells that changed hands during the last tick (HUD read-only). */
-  lastFlips: number;
+  /** Cells captured during the last tick, used for the map flash. */
+  lastCaptured: number[];
+  nextIds: { building: number; event: number; order: number; strike: number };
 }
 
 export function countryIndexOf(state: GameState, countryId: CountryId | null | undefined): number {
@@ -98,7 +159,6 @@ export function countryIndexOf(state: GameState, countryId: CountryId | null | u
   return state.countryOrder.indexOf(countryId);
 }
 
-export function countryAt(state: GameState, index: number): CountryState | null {
-  const id = state.countryOrder[index];
-  return id ? state.countries[id] ?? null : null;
+export function countryIdAt(state: GameState, index: number): CountryId | null {
+  return state.countryOrder[index] ?? null;
 }

@@ -21,7 +21,7 @@ export function MainMenu() {
           ГОСПОДСТВО
         </h1>
         <p className="menu__subtitle">
-          Экономика, оружие и безопасность. Захватывайте клетки по правилам «Жизни» и держите границу армией.
+          Экономика, оружие и безопасность. Ведите армию по клеткам, стройте города и заводы, держите оборону.
         </p>
 
         <div className="menu__buttons">
@@ -44,13 +44,13 @@ export function MainMenu() {
 
         {latest ? (
           <p className="tiny muted menu__save">
-            Последнее сохранение: {latest.label} · {formatGameDate(latest.tick)} · земель {latest.ownedTerritories}
+            Последнее сохранение: {latest.label} · {formatGameDate(latest.tick)} · клеток {latest.ownedCells}
           </p>
         ) : (
           <p className="tiny muted menu__save">Сохранений пока нет — начните кампанию.</p>
         )}
       </div>
-      <footer className="menu__foot">Три государства · 28 территорий · полностью offline</footer>
+      <footer className="menu__foot">Три государства · тысячи клеток · полностью offline</footer>
       {helpOpen && <HelpDialog onClose={() => setHelpOpen(false)} />}
     </main>
   );

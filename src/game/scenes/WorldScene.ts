@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
-import { BUILDINGS, type BuildingKind } from '@/core/buildings/buildings';
-import type { GameState } from '@/core/state/types';
-import type { TerritoryStatic } from '@/core/world/world';
+import { BUILDINGS } from '@/core/buildings/buildings';
+import type { BuildingInstance, GameState } from '@/core/state/types';
 import { CameraController } from '@/game/camera/CameraController';
 import {
   buildingTextureKey,
@@ -16,14 +15,16 @@ import {
 import { TILE_PIXELS } from '@/game/sprites/terrainPainter';
 import { useGameStore } from '@/store/gameStore';
 
-interface BuildingMarker {
+interface Marker {
   signature: string;
-  sprites: Phaser.GameObjects.Image[];
+  sprites: Phaser.GameObjects.GameObject[];
 }
 
 /**
- * Draws the world: flat terrain, political tint per cell, national borders,
- * structure glyphs with their action radius and the selected territory.
+ * Draws the war map: terrain, per-cell political colours, country borders,
+ * structures (clustered when zoomed out), the selected cell, action radii and
+ * the strike flashes. Everything is read from the store; the scene never
+ * changes the game state on its own.
  */
 export class WorldScene extends Phaser.Scene {
   private gameRef: GameState | null = null;
@@ -31,16 +32,19 @@ export class WorldScene extends Phaser.Scene {
   private borderGraphics!: Phaser.GameObjects.Graphics;
   private radiusGraphics!: Phaser.GameObjects.Graphics;
   private selectionGraphics!: Phaser.GameObjects.Graphics;
+  private strikeGraphics!: Phaser.GameObjects.Graphics;
   private cameraController!: CameraController;
-  private buildingMarkers = new Map<string, BuildingMarker>();
-  private labels = new Map<string, Phaser.GameObjects.Text>();
-  private badges = new Map<string, Phaser.GameObjects.Text>();
-  private flashes = new Map<string, number>();
-  private lastRevision = -1;
-  private lastSelection: string | null = '__none__';
-  private lastChoice: BuildingKind | null = null;
+
+  private buildingMarkers = new Map<string, Marker>();
+  private regionLabels = new Map<string, Phaser.GameObjects.Text>();
+  private capitalLabels = new Map<string, Phaser.GameObjects.Text>();
+  private flashes: { cell: number; at: number }[] = [];
   private lastOwnerSignature = '';
-  private lastRadiiRevision = -1;
+  private lastRevision = -1;
+  private lastSelection: number | null = -2;
+  private lastChoice: string | null = '__none__';
+  private lastDraft: number | null = -2;
+  private lastZoomBucket = -1;
   private pinchDistance = 0;
 
   constructor() {
@@ -63,35 +67,35 @@ export class WorldScene extends Phaser.Scene {
 
     this.ownerLayer = ensureOwnerLayer(this, world);
     repaintOwnerLayer(world, game, this.ownerLayer);
-    const ownerImage = this.add.image(0, 0, ownerTextureKey(world.seed)).setOrigin(0, 0);
-    ownerImage.setScale(TILE_PIXELS).setDepth(1);
+    this.add
+      .image(0, 0, ownerTextureKey(world.seed))
+      .setOrigin(0, 0)
+      .setScale(TILE_PIXELS)
+      .setDepth(1);
 
     this.borderGraphics = this.add.graphics().setDepth(2);
     this.radiusGraphics = this.add.graphics().setDepth(3);
+    this.strikeGraphics = this.add.graphics().setDepth(5);
     this.selectionGraphics = this.add.graphics().setDepth(4);
     this.drawBorders(game);
 
     this.cameraController = new CameraController(this, width, height);
     this.cameraController.attach(this);
 
-    this.buildAll(game);
-    this.drawSelection(store.selectedTerritoryId);
+    this.syncMarkers(game);
+    this.syncLabels(game);
     this.lastOwnerSignature = this.ownerSignature(game);
-    this.lastSelection = store.selectedTerritoryId;
 
-    const capital = game.countries[game.playerCountryId]?.capitalTerritoryId;
-    const focusId = capital ?? world.territories[0]?.id ?? null;
-    if (focusId) {
-      const territory = world.territories.find((t) => t.id === focusId);
-      if (territory) {
-        this.cameraController.centerOn(territory.centroid.x * TILE_PIXELS, territory.centroid.y * TILE_PIXELS);
-      }
+    const capital = game.world.territories.find((region) => region.id === game.countries[game.playerCountryId]?.capitalRegionId);
+    const focus = capital ?? game.world.territories[0];
+    if (focus) {
+      this.cameraController.centerOn(focus.centroid.x * TILE_PIXELS, focus.centroid.y * TILE_PIXELS);
     }
 
     this.input.addPointer(2);
     this.setupInput();
     this.cameras.main.setBackgroundColor('#0a1626');
-    this.cameras.main.fadeIn(280, 6, 12, 22);
+    this.cameras.main.fadeIn(240, 6, 12, 22);
   }
 
   private setupInput(): void {
@@ -115,6 +119,14 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
+  private cellToPixel(cell: number): { x: number; y: number } {
+    const width = this.gameRef?.world.width ?? 1;
+    return {
+      x: (cell % width) * TILE_PIXELS + TILE_PIXELS / 2,
+      y: Math.floor(cell / width) * TILE_PIXELS + TILE_PIXELS / 2,
+    };
+  }
+
   private handleClick(pointer: Phaser.Input.Pointer): void {
     const game = this.gameRef;
     if (!game) return;
@@ -122,32 +134,39 @@ export class WorldScene extends Phaser.Scene {
     const tileX = Math.floor(worldPoint.x / TILE_PIXELS);
     const tileY = Math.floor(worldPoint.y / TILE_PIXELS);
     if (tileX < 0 || tileY < 0 || tileX >= game.world.width || tileY >= game.world.height) return;
-    const regionIndex = game.world.tileTerritory[tileY * game.world.width + tileX] ?? -1;
-    if (regionIndex < 0) {
-      useGameStore.getState().selectTerritory(null);
-      return;
-    }
-    const territory = game.world.territories[regionIndex];
-    if (!territory) return;
+    const cell = tileY * game.world.width + tileX;
     const store = useGameStore.getState();
+
+    if (store.strikeBuildingId) {
+      const result = store.fireAt(cell);
+      if (result.ok) this.flashes.push({ cell, at: this.time.now });
+      return;
+    }
     if (store.buildingChoice) {
-      const result = store.buildHere(territory.id);
-      if (result.ok) this.flashTerritory(territory, '#ffe9a8');
-      store.selectTerritory(territory.id);
+      const result = store.placeAt(cell);
+      if (result.ok) this.flashes.push({ cell, at: this.time.now });
       return;
     }
-    if (store.transferFrom) {
-      const result = store.finishTransfer(territory.id);
-      if (result.ok) this.flashTerritory(territory, '#9fd0ff');
+
+    const playerIndex = game.countryOrder.indexOf(game.playerCountryId);
+    const owner = game.cellOwner[cell] ?? -1;
+    const selected = store.selectedCell;
+    const selectedOwner = selected !== null ? game.cellOwner[selected] ?? -1 : -1;
+
+    // Own cell selected, enemy cell clicked → choose the direction of the push.
+    if (selected !== null && selectedOwner === playerIndex && owner >= 0 && owner !== playerIndex) {
+      const result = store.draftOffensive(cell);
+      if (!result.ok && result.message) store.pushNotice(result.message, 'danger');
       return;
     }
-    store.selectTerritory(territory.id);
+    store.cancelDraft();
+    store.selectCell(cell);
   }
 
   private ownerSignature(game: GameState): string {
     let signature = '';
-    for (const territory of game.world.territories) {
-      signature += `${territory.id}:${game.territories[territory.id]?.owner ?? '-'};`;
+    for (let cell = 0; cell < game.cellOwner.length; cell += 1) {
+      signature += String.fromCharCode(65 + Math.max(0, (game.cellOwner[cell] ?? -1) + 1));
     }
     return signature;
   }
@@ -156,201 +175,275 @@ export class WorldScene extends Phaser.Scene {
     const gfx = this.borderGraphics;
     gfx.clear();
     const world = game.world;
-    for (let y = 0; y < world.height; y += 1) {
-      for (let x = 0; x < world.width; x += 1) {
-        const index = y * world.width + x;
-        const region = world.tileTerritory[index] ?? -1;
-        if (region < 0) continue;
-        const px = x * TILE_PIXELS;
-        const py = y * TILE_PIXELS;
-        const ownerIndex = game.tileOwner[index] ?? -1;
-        const neighbours: [number, number, number, number][] = [
-          [x - 1, y, px, py],
-          [x + 1, y, px + TILE_PIXELS - 1, py],
-          [x, y - 1, px, py],
-          [x, y + 1, px, py + TILE_PIXELS - 1],
-        ];
-        for (const [nx, ny, ex, ey] of neighbours) {
-          if (nx < 0 || ny < 0 || nx >= world.width || ny >= world.height) continue;
-          const neighbourIndex = ny * world.width + nx;
-          const neighbourRegion = world.tileTerritory[neighbourIndex] ?? -1;
-          if (neighbourRegion === region) continue;
-          if (neighbourRegion < 0) {
-            // Coastline: a thin dark edge is enough, the painter already draws surf.
-            gfx.fillStyle(0x081422, 0.5);
-            if (nx !== x) gfx.fillRect(ex, py, 1, TILE_PIXELS);
-            else gfx.fillRect(px, ey, TILE_PIXELS, 1);
-            continue;
-          }
-          const neighbourOwner = game.tileOwner[neighbourIndex] ?? -1;
-          const national = neighbourOwner !== ownerIndex;
-          if (!national) {
-            gfx.fillStyle(0x0b1524, 0.28);
-            if (nx !== x) gfx.fillRect(ex, py, 1, TILE_PIXELS);
-            else gfx.fillRect(px, ey, TILE_PIXELS, 1);
-            continue;
-          }
-          const country = game.countryOrder[neighbourOwner] ? game.countries[game.countryOrder[neighbourOwner]!] : null;
-          const color = country ? Phaser.Display.Color.HexStringToColor(country.color).color : 0x1a2233;
-          gfx.fillStyle(color, 0.95);
-          if (nx !== x) gfx.fillRect(ex, py, 2, TILE_PIXELS);
-          else gfx.fillRect(px, ey, TILE_PIXELS, 2);
-        }
+    const width = world.width;
+    for (let cell = 0; cell < game.cellOwner.length; cell += 1) {
+      const owner = game.cellOwner[cell] ?? -1;
+      if (owner < 0) continue;
+      const x = cell % width;
+      const y = (cell / width) | 0;
+      const px = x * TILE_PIXELS;
+      const py = y * TILE_PIXELS;
+      const neighbours: [number, number][] = [
+        [x - 1, y],
+        [x + 1, y],
+        [x, y - 1],
+        [x, y + 1],
+      ];
+      for (const [nx, ny] of neighbours) {
+        if (nx < 0 || ny < 0 || nx >= width || ny >= world.height) continue;
+        const next = ny * width + nx;
+        const nextOwner = game.cellOwner[next] ?? -1;
+        if (nextOwner === owner) continue;
+        const east = nx !== x;
+        const gfxColor = nextOwner < 0 ? 0x081422 : 0x0b1524;
+        gfx.fillStyle(gfxColor, nextOwner < 0 ? 0.35 : 0.18);
+        if (east) gfx.fillRect(nx > x ? px + TILE_PIXELS - 1 : px, py, 1, TILE_PIXELS);
+        else gfx.fillRect(px, ny > y ? py + TILE_PIXELS - 1 : py, TILE_PIXELS, 1);
       }
     }
   }
 
-  private buildAll(game: GameState): void {
-    for (const territory of game.world.territories) {
-      this.syncBuildings(game, territory);
-      this.syncLabel(game, territory);
-      this.syncBadge(game, territory);
+  /** Structure icons when zoomed in, one counted cluster per region otherwise. */
+  private syncMarkers(game: GameState): void {
+    const zoomedIn = this.cameraController ? this.cameraController.zoom >= 1.15 : true;
+    const signatures = new Map<string, string>();
+    for (const region of Object.values(game.regions)) {
+      const key = `r:${region.id}`;
+      const parts = region.buildings.map((building) => `${building.id}:${building.kind}:${building.level}`);
+      signatures.set(key, `${zoomedIn ? 'in' : 'out'}|${parts.join(',')}|${region.owner ?? '-'}`);
+    }
+
+    for (const [key, marker] of [...this.buildingMarkers]) {
+      if (signatures.get(key) !== marker.signature || !signatures.has(key)) {
+        marker.sprites.forEach((sprite) => sprite.destroy());
+        this.buildingMarkers.delete(key);
+      }
+    }
+
+    for (const region of Object.values(game.regions)) {
+      const key = `r:${region.id}`;
+      const signature = signatures.get(key) ?? '';
+      if (this.buildingMarkers.has(key)) continue;
+      const sprites: Phaser.GameObjects.GameObject[] = [];
+      if (zoomedIn) {
+        for (const building of region.buildings) {
+          sprites.push(this.drawBuildingIcon(building));
+        }
+      } else if (region.buildings.length > 0) {
+        const staticRegion = game.world.territories.find((entry) => entry.id === region.id);
+        if (staticRegion) {
+          const counts = new Map<string, number>();
+          for (const building of region.buildings) {
+            counts.set(building.kind, (counts.get(building.kind) ?? 0) + 1);
+          }
+          const kinds = [...counts.entries()].slice(0, 3);
+          const baseX = staticRegion.centroid.x * TILE_PIXELS;
+          const baseY = staticRegion.centroid.y * TILE_PIXELS + 10;
+          kinds.forEach(([kind, count], index) => {
+            const offset = (index - (kinds.length - 1) / 2) * 14;
+            const icon = this.add
+              .image(baseX + offset, baseY, buildingTextureKey(kind as keyof typeof BUILDINGS))
+              .setDepth(11)
+              .setScale(1.1);
+            const label = this.add
+              .text(baseX + offset + 7, baseY + 6, `${count}`, {
+                fontFamily: 'monospace',
+                fontSize: '9px',
+                color: '#f4ecd8',
+                stroke: '#08111e',
+                strokeThickness: 3,
+              })
+              .setOrigin(0.5, 0.5)
+              .setDepth(12);
+            sprites.push(icon, label);
+          });
+        }
+      }
+      this.buildingMarkers.set(key, { signature, sprites });
     }
   }
 
-  private syncBuildings(game: GameState, territory: TerritoryStatic): void {
-    const state = game.territories[territory.id];
-    if (!state) return;
-    const signature = state.buildings.map((building) => `${building.id}:${building.kind}`).join('|') + `#${state.owner}`;
-    const existing = this.buildingMarkers.get(territory.id);
-    if (existing && existing.signature === signature) return;
-    existing?.sprites.forEach((sprite) => sprite.destroy());
-
-    const sprites: Phaser.GameObjects.Image[] = [];
-    const sorted = [...state.buildings].sort((a, b) => a.tile - b.tile);
-    sorted.forEach((building, order) => {
-      const x = (building.tile % game.world.width) * TILE_PIXELS + TILE_PIXELS / 2;
-      const y = Math.floor(building.tile / game.world.width) * TILE_PIXELS + TILE_PIXELS / 2;
-      const angle = (order / Math.max(1, sorted.length)) * Math.PI * 2;
-      const offset = sorted.length > 1 ? 5 : 0;
-      const sprite = this.add
-        .image(x + Math.cos(angle) * offset, y + Math.sin(angle) * offset - 3, buildingTextureKey(building.kind))
-        .setDepth(10);
-      sprite.setScale(0.9);
-      sprites.push(sprite);
-    });
-    this.buildingMarkers.set(territory.id, { signature, sprites });
+  private drawBuildingIcon(building: BuildingInstance): Phaser.GameObjects.Image {
+    const { x, y } = this.cellToPixel(building.cell);
+    const icon = this.add
+      .image(x, y, buildingTextureKey(building.kind))
+      .setDepth(10)
+      .setScale(0.8);
+    if (building.level > 1) icon.setTint(0xfff0c0);
+    return icon;
   }
 
-  private syncLabel(game: GameState, territory: TerritoryStatic): void {
-    let label = this.labels.get(territory.id);
-    if (!label) {
-      label = this.add
-        .text(territory.centroid.x * TILE_PIXELS, territory.centroid.y * TILE_PIXELS - 14, territory.name, {
-          fontFamily: 'monospace',
-          fontSize: '10px',
-          color: '#f2ecd8',
-          stroke: '#08111e',
-          strokeThickness: 3,
-        })
-        .setOrigin(0.5, 0.5)
-        .setDepth(12);
-      this.labels.set(territory.id, label);
+  private syncLabels(game: GameState): void {
+    for (const country of Object.values(game.countries)) {
+      const region = game.world.territories.find((entry) => entry.id === country.capitalRegionId);
+      if (!region) continue;
+      let label = this.capitalLabels.get(country.id);
+      if (!label) {
+        label = this.add
+          .text(region.centroid.x * TILE_PIXELS, region.centroid.y * TILE_PIXELS - 16, country.shortName, {
+            fontFamily: 'monospace',
+            fontSize: '11px',
+            color: '#f6efdd',
+            stroke: '#08111e',
+            strokeThickness: 3,
+          })
+          .setOrigin(0.5, 0.5)
+          .setDepth(13);
+        this.capitalLabels.set(country.id, label);
+      }
+    }
+    for (const country of Object.values(game.countries)) {
+      const label = this.capitalLabels.get(country.id);
+      if (!label) continue;
+      label.setColor(country.isPlayer ? '#ffe9a8' : '#f6efdd');
+      label.setVisible(country.alive);
     }
     void game;
   }
 
-  private syncBadge(game: GameState, territory: TerritoryStatic): void {
-    const state = game.territories[territory.id];
-    if (!state) return;
-    let badge = this.badges.get(territory.id);
-    if (!badge) {
-      badge = this.add
-        .text(territory.centroid.x * TILE_PIXELS + 12, territory.centroid.y * TILE_PIXELS + 8, '', {
-          fontFamily: 'monospace',
-          fontSize: '9px',
-          color: '#ffe9a8',
-          backgroundColor: 'rgba(8,14,24,0.7)',
-          padding: { left: 2, right: 2, top: 1, bottom: 1 },
-        })
-        .setOrigin(0.5, 0.5)
-        .setDepth(12);
-      this.badges.set(territory.id, badge);
-    }
-    badge.setText(`${Math.round(state.army)}`);
-    const selected = useGameStore.getState().selectedTerritoryId === territory.id;
-    badge.setVisible(selected || this.cameras.main.zoom > 1.25);
+  private selectRegionLabel(cell: number | null, game: GameState): void {
+    if (cell === null) return;
+    const index = game.world.tileTerritory[cell] ?? -1;
+    const region = game.world.territories[index];
+    if (!region) return;
+    if (this.regionLabels.has(region.id)) return;
+    const label = this.add
+      .text(region.centroid.x * TILE_PIXELS, region.centroid.y * TILE_PIXELS, region.name, {
+        fontFamily: 'monospace',
+        fontSize: '10px',
+        color: '#cfe6ff',
+        stroke: '#08111e',
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5, 0.5)
+      .setDepth(13);
+    this.regionLabels.set(region.id, label);
   }
 
-  private drawSelection(selectedId: string | null): void {
+  private drawSelection(game: GameState): void {
     const gfx = this.selectionGraphics;
+    const radius = this.radiusGraphics;
     gfx.clear();
-    const game = this.gameRef;
-    if (!game) return;
-    this.radiusGraphics.clear();
-    if (!selectedId) return;
-    const territory = game.world.territories.find((t) => t.id === selectedId);
-    if (!territory) return;
-    const state = game.territories[selectedId];
-    const color = state?.owner ? game.countries[state.owner]?.accent ?? '#ffe9a8' : '#ffe9a8';
-    const tiles = new Set(territory.tiles);
-    const width = game.world.width;
-    const tint = Phaser.Display.Color.HexStringToColor(color).color;
-    gfx.fillStyle(tint, 0.95);
-    for (const tile of territory.tiles) {
-      const x = (tile % width) * TILE_PIXELS;
-      const y = Math.floor(tile / width) * TILE_PIXELS;
-      const edges: [number, number, number, number, number][] = [
-        [tile - 1, x, y, TILE_PIXELS, 1],
-        [tile + 1, x + TILE_PIXELS - 1, y, 1, TILE_PIXELS],
-        [tile - width, x, y, TILE_PIXELS, 1],
-        [tile + width, x, y + TILE_PIXELS - 1, TILE_PIXELS, 1],
-      ];
-      for (const [neighbour, ex, ey, ew, eh] of edges) {
-        if (tiles.has(neighbour)) continue;
-        gfx.fillRect(ex, ey, ew, eh);
+    radius.clear();
+    const store = useGameStore.getState();
+    const selected = store.selectedCell;
+    const playerIndex = game.countryOrder.indexOf(game.playerCountryId);
+
+    if (selected !== null) {
+      const { x, y } = this.cellToPixel(selected);
+      const owner = game.cellOwner[selected] ?? -1;
+      const country = owner >= 0 ? game.countries[game.countryOrder[owner]!] : null;
+      const color = country ? Phaser.Display.Color.HexStringToColor(country.accent).color : 0x9fd0ff;
+      gfx.lineStyle(2, color, 0.95);
+      gfx.strokeRect(
+        x - TILE_PIXELS / 2 - 1,
+        y - TILE_PIXELS / 2 - 1,
+        TILE_PIXELS + 2,
+        TILE_PIXELS + 2,
+      );
+      if (owner === playerIndex) {
+        const neighbours = this.landNeighbourCells(game, selected);
+        for (const next of neighbours) {
+          if ((game.cellOwner[next] ?? -1) === playerIndex) continue;
+          const point = this.cellToPixel(next);
+          gfx.lineStyle(1, 0xff8a5c, 0.55);
+          gfx.strokeRect(
+            point.x - TILE_PIXELS / 2,
+            point.y - TILE_PIXELS / 2,
+            TILE_PIXELS,
+            TILE_PIXELS,
+          );
+        }
       }
     }
-    this.drawRadii(game, selectedId);
-  }
 
-  /**
-   * Coverage of AA batteries and barricades. Every own structure shows its
-   * radius; the ones inside the selected territory are highlighted.
-   */
-  private drawRadii(game: GameState, selectedId: string | null): void {
-    const gfx = this.radiusGraphics;
-    gfx.clear();
-    const playerId = game.playerCountryId;
-    for (const territory of Object.values(game.territories)) {
-      if (territory.owner !== playerId) continue;
-      const strong = territory.id === selectedId;
-      for (const building of territory.buildings) {
-        const def = BUILDINGS[building.kind];
-        if (!def?.radius) continue;
-        const x = (building.tile % game.world.width) * TILE_PIXELS + TILE_PIXELS / 2;
-        const y = Math.floor(building.tile / game.world.width) * TILE_PIXELS + TILE_PIXELS / 2;
-        const radius = def.radius * TILE_PIXELS;
-        gfx.lineStyle(strong ? 1 : 1, 0x9fd0ff, strong ? 0.85 : 0.35);
-        gfx.strokeCircle(x, y, radius);
-        gfx.fillStyle(0x9fd0ff, strong ? 0.06 : 0.02);
-        gfx.fillCircle(x, y, radius);
+    // The structure of the selected cell shows its action radius.
+    const regionIndex = selected !== null ? game.world.tileTerritory[selected] ?? -1 : -1;
+    const region = regionIndex >= 0 ? game.regions[game.world.territories[regionIndex]?.id ?? ''] : undefined;
+    const building = region?.buildings.find((entry) => entry.cell === selected);
+    if (building) {
+      const def = BUILDINGS[building.kind];
+      if (def.radius) {
+        const { x, y } = this.cellToPixel(building.cell);
+        const pixels = def.radius * TILE_PIXELS;
+        radius.fillStyle(0x9fd0ff, 0.07);
+        radius.fillCircle(x, y, pixels);
+        radius.lineStyle(1, 0x9fd0ff, 0.55);
+        radius.strokeCircle(x, y, pixels);
       }
     }
+
+    // Direction draft: highlight the target and draw a line from the source.
+    const draft = store.orderDraft;
+    if (draft) {
+      const target = this.cellToPixel(draft.targetCell);
+      const source = selected !== null ? this.cellToPixel(selected) : null;
+      if (source) {
+        gfx.lineStyle(1, 0xff8a5c, 0.5);
+        gfx.lineBetween(source.x, source.y, target.x, target.y);
+      }
+      gfx.lineStyle(2, 0xff8a5c, 0.95);
+      gfx.strokeRect(
+        target.x - TILE_PIXELS / 2 - 1,
+        target.y - TILE_PIXELS / 2 - 1,
+        TILE_PIXELS + 2,
+        TILE_PIXELS + 2,
+      );
+    }
   }
 
-  private flashTerritory(territory: TerritoryStatic, color: string): void {
-    const game = this.gameRef;
-    if (!game) return;
+  private landNeighbourCells(game: GameState, cell: number): number[] {
     const width = game.world.width;
-    const gfx = this.add.graphics().setDepth(6);
-    gfx.fillStyle(Phaser.Display.Color.HexStringToColor(color).color, 0.35);
-    for (const tile of territory.tiles) {
-      gfx.fillRect((tile % width) * TILE_PIXELS, Math.floor(tile / width) * TILE_PIXELS, TILE_PIXELS, TILE_PIXELS);
+    const x = cell % width;
+    const y = (cell / width) | 0;
+    const out: number[] = [];
+    for (const [dx, dy] of [
+      [-1, 0],
+      [1, 0],
+      [0, -1],
+      [0, 1],
+    ] as const) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= width || ny >= game.world.height) continue;
+      out.push(ny * width + nx);
     }
-    this.tweens.add({ targets: gfx, alpha: 0, duration: 700, onComplete: () => gfx.destroy() });
+    return out;
+  }
+
+  private drawStrikes(game: GameState, time: number): void {
+    const gfx = this.strikeGraphics;
+    gfx.clear();
+    for (const strike of game.strikes) {
+      const progress = Phaser.Math.Clamp((game.tick + 1 - strike.fireAtTick) / 2, 0, 1);
+      const from = this.cellToPixel(strike.fromCell);
+      const to = this.cellToPixel(strike.targetCell);
+      const x = Phaser.Math.Linear(from.x, to.x, progress);
+      const y = Phaser.Math.Linear(from.y, to.y, progress);
+      const color = strike.kind === 'missile' ? 0xff8a5c : 0xffe9a8;
+      gfx.fillStyle(color, 0.95);
+      if (strike.kind === 'missile') gfx.fillRect(x - 1, y - 1, 3, 3);
+      else {
+        const size = 2 + Math.sin(time / 60) * 1;
+        gfx.fillRect(x - size, y - size, size * 2, size * 2);
+      }
+    }
+    for (const flash of this.flashes) {
+      const age = time - flash.at;
+      if (age > 450) continue;
+      const alpha = 1 - age / 450;
+      const { x, y } = this.cellToPixel(flash.cell);
+      const size = TILE_PIXELS * (1 + age / 260);
+      gfx.fillStyle(0xffd27a, alpha * 0.65);
+      gfx.fillRect(x - size / 2, y - size / 2, size, size);
+    }
   }
 
   private handleCaptures(game: GameState): void {
-    for (const territory of game.world.territories) {
-      const state = game.territories[territory.id];
-      if (!state?.capturedAtTick) continue;
-      if ((this.flashes.get(territory.id) ?? -1) >= state.capturedAtTick) continue;
-      this.flashes.set(territory.id, state.capturedAtTick);
-      const country = state.owner ? game.countries[state.owner] : null;
-      this.flashTerritory(territory, country?.accent ?? '#ffffff');
-      this.cameras.main.shake(120, 0.002);
-    }
+    const now = this.time.now;
+    for (const cell of game.lastCaptured) this.flashes.push({ cell, at: now });
+    if (game.lastCaptured.length > 0) this.cameras.main.shake(90, 0.0015);
+    this.flashes = this.flashes.filter((flash) => now - flash.at < 500);
   }
 
   private handlePinch(): void {
@@ -359,11 +452,7 @@ export class WorldScene extends Phaser.Scene {
     if (pointer1?.isDown && pointer2?.isDown) {
       const distance = Phaser.Math.Distance.Between(pointer1.x, pointer1.y, pointer2.x, pointer2.y);
       if (this.pinchDistance > 0 && Math.abs(distance - this.pinchDistance) > 1) {
-        this.cameraController.handlePinch(
-          distance,
-          (pointer1.x + pointer2.x) / 2,
-          (pointer1.y + pointer2.y) / 2,
-        );
+        this.cameraController.handlePinch(distance, (pointer1.x + pointer2.x) / 2, (pointer1.y + pointer2.y) / 2);
       }
       this.pinchDistance = distance;
     } else {
@@ -375,7 +464,6 @@ export class WorldScene extends Phaser.Scene {
     const store = useGameStore.getState();
     const game = store.game;
     if (!game || !this.cameraController) return;
-
     if (game !== this.gameRef) {
       this.scene.restart();
       return;
@@ -392,42 +480,47 @@ export class WorldScene extends Phaser.Scene {
         repaintOwnerLayer(game.world, game, this.ownerLayer);
         this.drawBorders(game);
         this.buildingMarkers.forEach((marker) => {
-          marker.signature = '__stale__';
+          marker.sprites.forEach((sprite) => sprite.destroy());
         });
-      }
-      for (const territory of game.world.territories) {
-        this.syncBuildings(game, territory);
-        this.syncBadge(game, territory);
+        this.buildingMarkers.clear();
       }
       this.handleCaptures(game);
+      this.syncMarkers(game);
     }
 
-    if (store.selectedTerritoryId !== this.lastSelection) {
-      this.lastSelection = store.selectedTerritoryId;
-      this.drawSelection(store.selectedTerritoryId);
+    const zoomBucket = Math.round(this.cameraController.zoom * 4);
+    if (zoomBucket !== this.lastZoomBucket) {
+      this.lastZoomBucket = zoomBucket;
+      this.syncMarkers(game);
     }
-    if (store.buildingChoice !== this.lastChoice) {
+
+    if (store.selectedCell !== this.lastSelection) {
+      this.lastSelection = store.selectedCell;
+      this.selectRegionLabel(store.selectedCell, game);
+      this.drawSelection(game);
+    }
+    if (store.buildingChoice !== this.lastChoice || store.orderDraft?.targetCell !== this.lastDraft) {
       this.lastChoice = store.buildingChoice;
-      this.drawSelection(store.selectedTerritoryId);
+      this.lastDraft = store.orderDraft?.targetCell ?? null;
+      this.drawSelection(game);
     }
-    // Radii follow the map: they appear and disappear as structures change.
-    if (store.revision !== this.lastRadiiRevision) {
-      this.lastRadiiRevision = store.revision;
-      this.drawRadii(game, store.selectedTerritoryId);
-    }
+
+    this.drawStrikes(game, time);
 
     const zoom = this.cameraController.zoom;
-    const showNames = zoom > 1.15;
-    for (const [id, label] of this.labels) {
-      const selected = store.selectedTerritoryId === id;
-      label.setVisible(showNames || selected);
+    for (const label of this.capitalLabels.values()) {
+      label.setVisible(zoom > 0.85);
       label.setScale(1 / zoom);
     }
-    for (const [id, badge] of this.badges) {
-      const selected = store.selectedTerritoryId === id;
-      badge.setVisible(selected || zoom > 1.25);
-      badge.setScale(1 / zoom);
+    for (const label of this.regionLabels.values()) {
+      label.setVisible(zoom > 1.35);
+      label.setScale(1 / zoom);
     }
-    this.selectionGraphics.setAlpha(store.buildingChoice ? 0.55 + Math.sin(time / 240) * 0.35 : 0.9);
+    for (const marker of this.buildingMarkers.values()) {
+      for (const sprite of marker.sprites) {
+        if (sprite instanceof Phaser.GameObjects.Text) sprite.setScale(1 / Math.max(1, zoom * 0.8));
+      }
+    }
+    this.selectionGraphics.setAlpha(store.buildingChoice || store.strikeBuildingId ? 0.55 + Math.sin(time / 240) * 0.35 : 0.9);
   }
 }

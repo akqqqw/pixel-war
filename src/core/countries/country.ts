@@ -7,6 +7,8 @@ export interface CountryBonus {
   money?: number;
   /** Extra starting army in the capital. */
   capitalArmy?: number;
+  /** Multiplier for the starting population. */
+  populationMultiplier?: number;
   /** Extra starting buildings in the capital. */
   capitalBuildings?: string[];
 }

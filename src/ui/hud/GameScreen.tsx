@@ -3,11 +3,14 @@ import { createPhaserGame } from '@/game/PhaserGame';
 import { useGameStore } from '@/store/gameStore';
 import { TopBar } from '@/ui/hud/TopBar';
 import { BottomPanel } from '@/ui/hud/BottomPanel';
+import { CellPanel } from '@/ui/hud/CellPanel';
+import { OrderPanel } from '@/ui/hud/OrderPanel';
 import { VictoryModal } from '@/ui/hud/VictoryModal';
 import { MenuDialog } from '@/ui/hud/MenuDialog';
 import { HelpDialog } from '@/ui/hud/HelpDialog';
 import { Toasts } from '@/ui/hud/Toasts';
 
+/** The map fills the screen; the interface floats in three slim corners. */
 export function GameScreen() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const advance = useGameStore((state) => state.advance);
@@ -59,14 +62,15 @@ export function GameScreen() {
       if (event.target instanceof HTMLInputElement) return;
       if (event.code === 'Space') {
         event.preventDefault();
-        const game = useGameStore.getState().game;
-        if (game) setSpeed(game.speed === 0 ? 1 : 0);
+        useGameStore.getState().togglePause();
       } else if (event.key === '1') setSpeed(1);
       else if (event.key === '2') setSpeed(2);
       else if (event.key === '3') setSpeed(4);
       else if (event.key === 'Escape') {
-        useGameStore.getState().chooseBuilding(null);
-        useGameStore.getState().cancelTransfer();
+        const store = useGameStore.getState();
+        store.chooseBuilding(null);
+        store.cancelDraft();
+        store.cancelStrike();
         setMenuOpen(false);
         setHelpOpen(false);
       } else if (event.key.toLowerCase() === 's' && (event.ctrlKey || event.metaKey)) {
@@ -80,20 +84,14 @@ export function GameScreen() {
 
   return (
     <div className="game">
+      <div ref={hostRef} className="game__canvas" />
       <TopBar onMenu={() => setMenuOpen(true)} />
-      <div className="game__map">
-        <div ref={hostRef} className="game__canvas" />
-        <div className="game__legend">
-          <span>
-            <i className="legend__swatch" style={{ background: '#9fd0ff' }} /> выбранная территория
-          </span>
-          <span>колесо/щипок — масштаб, перетаскивание — карта</span>
-          <button type="button" className="btn btn--ghost btn--sm" onClick={() => setHelpOpen(true)}>
-            Как играть
-          </button>
-        </div>
-      </div>
+      <OrderPanel />
+      <CellPanel />
       <BottomPanel />
+      <button type="button" className="help-btn" onClick={() => setHelpOpen(true)} title="Как играть">
+        ?
+      </button>
       <Toasts />
       {menuOpen && (
         <MenuDialog

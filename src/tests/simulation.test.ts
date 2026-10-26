@@ -1,22 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { BALANCE, TICK_MS } from '@/core/sim/balance';
-import { countryTotals } from '@/core/sim/economy';
+import { TICK_MS } from '@/core/sim/balance';
+import { countryPopulation, territoryShare } from '@/core/sim/effects';
 import { GameClock, MAX_TICKS_PER_FRAME, runTick } from '@/core/sim/simulation';
 import { createGame } from '@/core/state/createGame';
 import { checkVictory } from '@/core/sim/victory';
-import { territoryEffects } from '@/core/sim/effects';
 
 function game(seed = 90210, difficulty: 'easy' | 'normal' | 'hard' = 'normal') {
   return createGame({ seed, playerCountryId: 'aquilonia', difficulty });
 }
 
 describe('simulation loop', () => {
-  it('advances one hour per tick', () => {
+  it('advances one tick at a time and pays taxes', () => {
     const state = game();
-    const before = state.countries[state.playerCountryId]!.money;
+    const country = state.countries[state.playerCountryId]!;
+    country.army = 0;
+    const money = country.money;
+    const population = countryPopulation(state, country.id);
     runTick(state);
     expect(state.tick).toBe(1);
-    expect(state.countries[state.playerCountryId]!.money).toBeGreaterThan(before);
+    expect(country.money).toBeGreaterThan(money);
+    expect(countryPopulation(state, country.id)).toBeGreaterThan(population);
+    expect(territoryShare(state, country.id)).toBeGreaterThan(0);
   });
 
   it('stops ticking after the game is over', () => {
@@ -36,112 +40,73 @@ describe('simulation loop', () => {
     expect(state.tick).toBe(0);
 
     state.speed = 1;
-    expect(clock.advance(TICK_MS)).toBe(1);
+    clock.reset();
+    expect(clock.advance(TICK_MS - 1)).toBe(0);
+    expect(clock.advance(1)).toBe(1);
     expect(state.tick).toBe(1);
-    expect(clock.advance(TICK_MS / 2)).toBe(0);
-    expect(clock.advance(TICK_MS / 2)).toBe(1);
 
-    state.speed = 4;
-    expect(clock.advance(TICK_MS)).toBe(4);
-    expect(state.tick).toBe(6);
-
-    // A tab switch must not fast-forward the whole campaign.
-    const jumped = clock.advance(10 * 60 * 1000);
-    expect(jumped).toBeLessThanOrEqual(MAX_TICKS_PER_FRAME * 4);
+    state.speed = 2;
+    clock.reset();
+    expect(clock.advance(TICK_MS)).toBe(2);
   });
 
-  it('never breaks the invariants while running unattended', () => {
-    const state = game(4711, 'easy');
+  it('never runs more than the frame budget of ticks', () => {
+    const state = game();
+    state.speed = 4;
+    const clock = new GameClock(state);
+    const ticks = clock.advance(60_000);
+    expect(ticks).toBe(MAX_TICKS_PER_FRAME * 4);
+  });
+
+  it('lets the AI act on its own — no free money, but it builds and mobilises', () => {
+    const state = game(1337, 'hard');
+    const rival = Object.values(state.countries).find((country) => !country.isPlayer)!;
+    const armyBefore = rival.army;
+    for (let i = 0; i < 240; i += 1) runTick(state);
+    expect(rival.alive).toBe(true);
+    expect(rival.money).toBeGreaterThanOrEqual(0);
+    expect(rival.army).not.toBe(armyBefore);
+    const structures = Object.values(state.regions)
+      .filter((region) => region.owner === rival.id)
+      .reduce((sum, region) => sum + region.buildings.length, 0);
+    expect(structures).toBeGreaterThan(0);
+  });
+
+  it('wins by domination and loses when every cell is gone', () => {
+    const state = game(4242);
+    const player = state.playerCountryId;
+    const index = state.countryOrder.indexOf(player);
+    for (let cell = 0; cell < state.cellOwner.length; cell += 1) {
+      if ((state.world.tileTerritory[cell] ?? -1) < 0) continue;
+      state.cellOwner[cell] = index;
+    }
+    checkVictory(state);
+    expect(state.status).toBe('victory');
+    expect(state.speed).toBe(0);
+
+    const lost = game(4242);
+    const lostIndex = lost.countryOrder.indexOf(lost.playerCountryId);
+    for (let cell = 0; cell < lost.cellOwner.length; cell += 1) {
+      if (lost.cellOwner[cell] === lostIndex) lost.cellOwner[cell] = -1;
+    }
+    lost.status = 'playing';
+    checkVictory(lost);
+    expect(lost.status).toBe('defeat');
+  });
+
+  it('keeps the whole world consistent over a long run', () => {
+    const state = game(555);
     for (let i = 0; i < 300; i += 1) runTick(state);
-    for (const territory of Object.values(state.territories)) {
-      expect(territory.population).toBeGreaterThan(0);
-      expect(territory.army).toBeGreaterThanOrEqual(0);
-      expect(Number.isFinite(territory.army)).toBe(true);
-      const effects = territoryEffects(territory);
-      expect(effects.populationCap).toBeGreaterThanOrEqual(BALANCE.basePopulationCap);
-      for (const building of territory.buildings) {
-        expect(building.tile).toBeGreaterThanOrEqual(0);
-        expect(building.tile).toBeLessThan(state.world.width * state.world.height);
-      }
+    for (let cell = 0; cell < state.cellOwner.length; cell += 1) {
+      const owner = state.cellOwner[cell] ?? -1;
+      if (owner < 0) continue;
+      expect(state.countryOrder[owner]).toBeTruthy();
+      expect(Number.isFinite(state.cellArmy[cell])).toBe(true);
+      expect(state.cellArmy[cell]).toBeGreaterThanOrEqual(0);
     }
     for (const country of Object.values(state.countries)) {
       expect(country.money).toBeGreaterThanOrEqual(0);
-      expect(Number.isFinite(country.income)).toBe(true);
-      for (const enemyId of country.warWith) expect(state.countries[enemyId]).toBeTruthy();
+      expect(Number.isFinite(country.population)).toBe(true);
     }
-    expect(state.tick).toBe(300);
-    expect(state.status).toBe('playing');
-  });
-
-  it('lets the AI fight for real on hard', () => {
-    const state = game(4711, 'hard');
-    const playerId = state.playerCountryId;
-    const start = Object.values(state.territories).filter((t) => t.owner === playerId).length;
-    for (let i = 0; i < 400; i += 1) {
-      runTick(state);
-      if (state.status !== 'playing') break;
-    }
-    const now = Object.values(state.territories).filter((t) => t.owner === playerId).length;
-    expect(now).toBeLessThan(start);
-    expect(state.events.some((event) => event.kind === 'war')).toBe(true);
-  });
-
-  it('never lets the AI spend money it does not own', () => {
-    const state = game(4242, 'hard');
-    for (let i = 0; i < 200; i += 1) {
-      runTick(state);
-      for (const country of Object.values(state.countries)) {
-        expect(country.money).toBeGreaterThanOrEqual(0);
-        const totals = countryTotals(state, country.id);
-        if (country.isPlayer) continue;
-        for (const territory of Object.values(state.territories)) {
-          if (territory.owner !== country.id) continue;
-          expect(territory.army).toBeLessThanOrEqual(totals.army + 1e-6);
-        }
-      }
-      if (state.status !== 'playing') break;
-    }
-  });
-
-  it('gives every AI country the same rules as the player', () => {
-    const state = game(808, 'hard');
-    for (let i = 0; i < 260; i += 1) runTick(state);
-    const countries = Object.values(state.countries).filter((c) => c.alive);
-    expect(countries.length).toBeGreaterThan(1);
-    for (const country of countries) {
-      const totals = countryTotals(state, country.id);
-      expect(totals.territories).toBeGreaterThan(0);
-      expect(totals.army).toBeGreaterThan(0);
-      // Nobody can hold armies for free: the upkeep is the same for everyone.
-      expect(totals.army * BALANCE.armyUpkeep).toBeLessThan(totals.population * BALANCE.taxRate + 400);
-    }
-    expect(state.countries[state.playerCountryId]).toBeTruthy();
-  });
-
-  it('declares victory when the map is conquered and defeat when all is lost', () => {
-    const won = game();
-    const playerId = won.playerCountryId;
-    for (const territory of Object.values(won.territories)) territory.owner = playerId;
-    checkVictory(won);
-    expect(won.status).toBe('victory');
-    expect(won.victory?.kind).toBe('domination');
-    expect(won.speed).toBe(0);
-
-    const lost = game();
-    for (const territory of Object.values(lost.territories)) {
-      if (territory.owner === lost.playerCountryId) territory.owner = Object.keys(lost.countries).find(
-        (id) => id !== lost.playerCountryId,
-      )!;
-    }
-    checkVictory(lost);
-    expect(lost.status).toBe('defeat');
-    expect(lost.victory?.title).toBe('Поражение');
-  });
-
-  it('cannot be defeated and victorious at the same time', () => {
-    const state = game();
-    state.status = 'victory';
-    checkVictory(state);
-    expect(state.status).toBe('victory');
   });
 });

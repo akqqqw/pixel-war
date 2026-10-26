@@ -1,133 +1,142 @@
-/**
- * Every structure the player can buy. Three tabs: economy, weapons, security.
- * All numbers are deliberately readable in the UI — no hidden multipliers.
- */
+/** Eight structures of Pixel World War: three tabs, three levels each. */
+
 export type BuildingTab = 'economy' | 'weapons' | 'security';
 
 export type BuildingKind =
-  | 'city'
   | 'factory'
+  | 'city'
   | 'port'
-  | 'tankPlant'
   | 'missile'
+  | 'tankPlant'
   | 'airfield'
   | 'aa'
   | 'barricade';
 
 export interface BuildingDef {
   kind: BuildingKind;
-  tab: BuildingTab;
   name: string;
+  /** Short label for the compact cards. */
   short: string;
-  desc: string;
+  tab: BuildingTab;
   cost: number;
-  /** Max number of these on a single territory. */
+  /** How many can stand on one region. */
   limit: number;
-  /** Money per tick. */
+  maxLevel: number;
+  /** Gold per second at level 1 (scaled by level). */
   income?: number;
-  /** Population per tick (thousands of people). */
+  /** People per second at level 1 (scaled by level). */
   population?: number;
-  /** Army per tick. */
-  army?: number;
-  /** Effective radius in map tiles (security structures). */
+  /** Radius of action, map cells. */
   radius?: number;
-  /** Extra defence for cells inside the radius, 0..1. */
+  /** Extra defence inside the radius, 0..1 at level 1 (scaled by level). */
   defense?: number;
-  /** Attack bonus for the host territory, 0..1. */
+  /** Missile interception chance inside the radius, 0..1 at level 1. */
+  intercept?: number;
+  /** Damage of one strike at level 1. */
+  damage?: number;
+  /** Extra attack for friendly cells inside the radius, 0..1 at level 1. */
   attack?: number;
-  /** Intercepts incoming missiles inside the radius. */
-  intercept?: boolean;
-  /** Can only be built on a coastal territory. */
+  /** Needs a coast to be placed. */
   coastal?: boolean;
+  /** Short line shown on the card. */
+  desc: string;
 }
 
 export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
   city: {
     kind: 'city',
-    tab: 'economy',
     name: 'Город',
     short: 'Город',
-    desc: 'Растит население и приносит налоги. Больше людей — больше армии.',
-    cost: 260,
+    tab: 'economy',
+    cost: 800,
     limit: 3,
-    income: 2,
-    population: 2.5,
+    maxLevel: 3,
+    population: 5,
+    income: 5,
+    desc: 'Растит население и поднимает его предел.',
   },
   factory: {
     kind: 'factory',
-    tab: 'economy',
     name: 'Завод',
     short: 'Завод',
-    desc: 'Стабильный доход каждый час.',
-    cost: 220,
+    tab: 'economy',
+    cost: 500,
     limit: 3,
-    income: 4,
+    maxLevel: 3,
+    income: 15,
+    desc: 'Производит деньги для казны.',
   },
   port: {
     kind: 'port',
-    tab: 'economy',
     name: 'Морской порт',
     short: 'Порт',
-    desc: 'Торговля с внешним миром. Строится только на побережье.',
-    cost: 320,
+    tab: 'economy',
+    cost: 1200,
     limit: 2,
-    income: 6,
+    maxLevel: 3,
+    income: 35,
     coastal: true,
+    desc: 'Морская торговля. Только у воды.',
   },
   tankPlant: {
     kind: 'tankPlant',
-    tab: 'weapons',
     name: 'Завод сборки танков',
     short: 'Танки',
-    desc: 'Каждый час пополняет армию территории.',
-    cost: 380,
+    tab: 'weapons',
+    cost: 900,
     limit: 2,
-    army: 0.6,
+    maxLevel: 3,
+    desc: 'Собирает танки: сильнее атака и оборона.',
   },
   missile: {
     kind: 'missile',
-    tab: 'weapons',
     name: 'Ракетная установка',
     short: 'Ракеты',
-    desc: 'Автоматически бьёт по врагу в радиусе 2 территорий. ПВО сбивает ракеты.',
-    cost: 420,
+    tab: 'weapons',
+    cost: 1400,
     limit: 2,
-    radius: 2,
+    maxLevel: 3,
+    radius: 24,
+    damage: 140,
+    desc: 'Ручной удар по врагу в радиусе. Есть перезарядка.',
   },
   airfield: {
     kind: 'airfield',
-    tab: 'weapons',
     name: 'Взлётная площадка',
     short: 'Авиация',
-    desc: 'Усиливает атаку своей территории и соседних, добавляет армию.',
-    cost: 400,
+    tab: 'weapons',
+    cost: 1100,
     limit: 2,
-    army: 0.25,
-    attack: 0.25,
-    radius: 1,
+    maxLevel: 3,
+    radius: 20,
+    damage: 90,
+    attack: 0.15,
+    desc: 'Самолёты для ударов и усиления атаки рядом.',
   },
   aa: {
     kind: 'aa',
-    tab: 'security',
     name: 'ПВО',
     short: 'ПВО',
-    desc: 'Радиус 6 тайлов: сбивает ракеты и укрепляет оборону клеток.',
-    cost: 320,
-    limit: 2,
-    radius: 6,
-    defense: 0.2,
-    intercept: true,
+    tab: 'security',
+    cost: 1000,
+    limit: 3,
+    maxLevel: 3,
+    radius: 8,
+    intercept: 0.7,
+    defense: 0.1,
+    desc: 'Сбивает ракеты и ослабляет авиаудары.',
   },
   barricade: {
     kind: 'barricade',
-    tab: 'security',
     name: 'Баррикада',
     short: 'Баррикада',
-    desc: 'Радиус 4 тайла: враг почти не может перекрасить клетки внутри.',
-    cost: 200,
-    limit: 3,
+    tab: 'security',
+    cost: 400,
+    limit: 4,
+    maxLevel: 3,
     radius: 4,
     defense: 0.35,
+    desc: 'Усиливает оборону клеток в радиусе.',
   },
 };
 
@@ -141,7 +150,6 @@ export const TAB_LABELS: Record<BuildingTab, string> = {
 
 export const TAB_ORDER: readonly BuildingTab[] = ['economy', 'weapons', 'security'];
 
-/** Cards are shown in design order: economy, then weapons, then security. */
 const TAB_CONTENT: Record<BuildingTab, readonly BuildingKind[]> = {
   economy: ['factory', 'city', 'port'],
   weapons: ['missile', 'tankPlant', 'airfield'],
@@ -149,23 +157,60 @@ const TAB_CONTENT: Record<BuildingTab, readonly BuildingKind[]> = {
 };
 
 export function buildingsOfTab(tab: BuildingTab): BuildingDef[] {
-  return TAB_CONTENT[tab].map((kind) => BUILDINGS[kind]).filter((def): def is BuildingDef => !!def);
+  return TAB_CONTENT[tab].map((kind) => BUILDINGS[kind]);
 }
 
-export function buildingDef(kind: BuildingKind): BuildingDef {
-  return BUILDINGS[kind];
+/** Level multiplier: 1 → ×1, 2 → ×1.5, 3 → ×2.25. */
+export function levelFactor(level: number): number {
+  return Math.pow(1.5, Math.max(0, level - 1));
 }
 
-/** Short, human readable effect line used on the build cards. */
-export function buildingEffect(def: BuildingDef): string {
+/** Price of the next level. */
+export function upgradeCost(kind: BuildingKind, level: number): number {
+  return Math.round(BUILDINGS[kind].cost * 0.9 * Math.pow(1.6, Math.max(0, level - 1)));
+}
+
+export function buildingIncome(kind: BuildingKind, level: number): number {
+  return Math.round((BUILDINGS[kind].income ?? 0) * levelFactor(level) * 10) / 10;
+}
+
+export function buildingPopulation(kind: BuildingKind, level: number): number {
+  return Math.round((BUILDINGS[kind].population ?? 0) * levelFactor(level) * 10) / 10;
+}
+
+export function buildingDefense(kind: BuildingKind, level: number): number {
+  return Math.round((BUILDINGS[kind].defense ?? 0) * levelFactor(level) * 1000) / 1000;
+}
+
+export function buildingRadius(kind: BuildingKind, level: number): number {
+  const base = BUILDINGS[kind].radius ?? 0;
+  if (!base) return 0;
+  return Math.round(base * (1 + (level - 1) * 0.15));
+}
+
+export function buildingDamage(kind: BuildingKind, level: number): number {
+  return Math.round((BUILDINGS[kind].damage ?? 0) * levelFactor(level));
+}
+
+export function buildingIntercept(kind: BuildingKind, level: number): number {
+  return Math.round((BUILDINGS[kind].intercept ?? 0) * levelFactor(level) * 1000) / 1000;
+}
+
+/** Compact effect line for the cards and the context menu. */
+export function buildingEffect(kind: BuildingKind, level = 1): string {
+  const def = BUILDINGS[kind];
   const parts: string[] = [];
-  if (def.income) parts.push(`+${def.income} ₽/ч`);
-  if (def.population) parts.push(`+${def.population} тыс./ч`);
-  if (def.army) parts.push(`+${def.army} армии/ч`);
-  if (def.attack) parts.push(`атака +${Math.round(def.attack * 100)}%`);
-  if (def.defense) parts.push(`оборона +${Math.round(def.defense * 100)}%`);
-  if (def.intercept) parts.push('перехват ракет');
-  if (def.radius && def.tab === 'security') parts.push(`радиус ${def.radius}`);
-  if (def.tab === 'weapons' && def.kind === 'missile') parts.push('радиус 2 территории');
+  if (def.income) parts.push(`+${buildingIncome(kind, level)} зол/с`);
+  if (def.population) parts.push(`+${buildingPopulation(kind, level)} люд/с`);
+  if (def.intercept) {
+    parts.push(`перехват ${Math.round(Math.min(0.95, buildingIntercept(kind, level)) * 100)}%`);
+  }
+  if (def.defense && kind === 'barricade') {
+    parts.push(`оборона +${Math.round(buildingDefense(kind, level) * 100)}%`);
+  }
+  if (def.attack) parts.push(`атака +${Math.round(def.attack * levelFactor(level) * 100)}%`);
+  if (def.damage) parts.push(`урон ${buildingDamage(kind, level)}`);
+  if (kind === 'tankPlant') parts.push('производит танки');
+  if (def.radius) parts.push(`радиус ${buildingRadius(kind, level)}`);
   return parts.join(' · ');
 }

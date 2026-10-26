@@ -1,10 +1,27 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
 import { BUILDINGS } from '@/core/buildings/buildings';
-import { useGameStore } from '@/store/gameStore';
+import { playerOffensive, useGameStore } from '@/store/gameStore';
+import { regionOfCell } from '@/core/world/cells';
 
 function store() {
   return useGameStore.getState();
+}
+
+function ownCellWithSpace(): number {
+  const state = store();
+  const game = state.game!;
+  const index = game.countryOrder.indexOf(game.playerCountryId);
+  for (let cell = 0; cell < game.cellOwner.length; cell += 1) {
+    if ((game.cellOwner[cell] ?? -1) !== index) continue;
+    const region = regionOfCell(game.world, cell);
+    if (!region) continue;
+    const regionState = game.regions[region.id];
+    if (!regionState) continue;
+    if (regionState.buildings.some((building) => building.cell === cell)) continue;
+    return cell;
+  }
+  throw new Error('no free own cell');
 }
 
 describe('game store', () => {
@@ -16,9 +33,10 @@ describe('game store', () => {
       clock: null,
       saves: [],
       notices: [],
-      selectedTerritoryId: null,
+      selectedCell: null,
       buildingChoice: null,
-      transferFrom: null,
+      orderDraft: null,
+      strikeBuildingId: null,
       loading: false,
       lastAutosaveTick: 0,
       lastStatus: 'playing',
@@ -27,98 +45,116 @@ describe('game store', () => {
 
   it('starts a campaign and wires the clock to it', () => {
     store().startNewGame('draconia', 'easy');
-    const state = store();
-    expect(state.screen).toBe('game');
-    expect(state.game?.playerCountryId).toBe('draconia');
-    expect(state.clock).not.toBeNull();
+    expect(store().screen).toBe('game');
+    expect(store().game?.playerCountryId).toBe('draconia');
+    expect(store().clock).not.toBeNull();
 
-    const tick = state.game!.tick;
-    store().advance(1000);
+    const tick = store().game!.tick;
+    store().advance(500);
     expect(store().game!.tick).toBe(tick + 1);
 
-    store().setSpeed(0);
+    store().togglePause();
+    expect(store().game!.speed).toBe(0);
     store().advance(5000);
     expect(store().game!.tick).toBe(tick + 1);
   });
 
-  it('builds and recruits through the same actions the panel uses', () => {
-    store().startNewGame('veldania', 'normal');
-    const game = store().game!;
-    const capital = game.countries[game.playerCountryId]!.capitalTerritoryId!;
-    game.countries[game.playerCountryId]!.money = 5000;
-    store().selectTerritory(capital);
-
-    store().chooseBuilding('factory');
-    expect(store().buildingChoice).toBe('factory');
-    const built = store().buildHere(capital);
-    expect(built.ok).toBe(true);
-    expect(game.territories[capital]!.buildings.some((b) => b.kind === 'factory')).toBe(true);
-    expect(store().notices.at(-1)?.text).toContain(BUILDINGS.factory.name);
-
-    const army = game.territories[capital]!.army;
-    expect(store().recruitHere(capital, 10).ok).toBe(true);
-    expect(game.territories[capital]!.army).toBeCloseTo(army + 10, 1);
-
-    store().chooseBuilding(null);
-    expect(store().buildHere(capital).ok).toBe(false);
-  });
-
-  it('declares war and peace from the selection', () => {
+  it('builds on the selected own cell and refuses a foreign one', () => {
     store().startNewGame('aquilonia', 'normal');
     const game = store().game!;
-    const enemy = Object.values(game.countries).find((country) => !country.isPlayer)!;
-    store().selectTerritory(Object.values(game.territories).find((t) => t.owner === enemy.id)!.id);
+    const country = game.countries[game.playerCountryId]!;
+    country.money = 10_000;
+    const cell = ownCellWithSpace();
 
-    expect(store().declareWarOn(enemy.id).ok).toBe(true);
-    expect(game.countries[game.playerCountryId]!.warWith).toContain(enemy.id);
-    expect(game.countries[enemy.id]!.warWith).toContain(game.playerCountryId);
-
-    expect(store().makePeaceWith(enemy.id).ok).toBe(true);
-    expect(game.countries[game.playerCountryId]!.warWith).not.toContain(enemy.id);
-  });
-
-  it('saves on demand and reloads the campaign from the menu', async () => {
-    store().startNewGame('aquilonia', 'easy');
-    for (let i = 0; i < 3; i += 1) store().advance(1000);
-    const tick = store().game!.tick;
-
-    expect(await store().saveGame('Ручное')).toBe(true);
-    await store().refreshSaves();
-    expect(store().saves.length).toBeGreaterThan(0);
-
-    store().exitToMenu();
-    expect(store().screen).toBe('menu');
-
-    const resumed = await store().continueGame();
-    expect(resumed).toBe(true);
-    expect(store().screen).toBe('game');
-    expect(store().game!.tick).toBeGreaterThanOrEqual(tick);
-  });
-
-  it('moves army between neighbouring own territories', () => {
-    store().startNewGame('draconia', 'normal');
-    const game = store().game!;
-    const playerId = game.playerCountryId;
-    const owned = Object.values(game.territories).filter((t) => t.owner === playerId);
-    const pair = owned
-      .map((territory) => ({
-        from: territory,
-        to: game.world.territories
-          .find((t) => t.id === territory.id)!
-          .neighbors.map((id) => game.territories[id]!)
-          .find((other) => other?.owner === playerId),
-      }))
-      .find((entry) => !!entry.to);
-    expect(pair).toBeTruthy();
-    const { from, to } = pair!;
-    const target = to!;
-    const before = target.army;
-
-    store().startTransfer(from.id);
-    expect(store().transferFrom).toBe(from.id);
-    const result = store().finishTransfer(target.id);
+    const regionId = regionOfCell(game.world, cell)!.id;
+    const builtBefore = game.regions[regionId]!.buildings.length;
+    store().selectCell(cell);
+    store().chooseBuilding('factory');
+    const result = store().placeAt(cell);
     expect(result.ok).toBe(true);
-    expect(target.army).toBeGreaterThan(before);
-    expect(store().transferFrom).toBeNull();
+    expect(game.regions[regionId]!.buildings.length).toBe(builtBefore + 1);
+    expect(country.money).toBeLessThan(10_000);
+
+    // A cell of another country cannot be built on.
+    const foreign = (() => {
+      const index = game.countryOrder.indexOf(game.playerCountryId);
+      for (let c = 0; c < game.cellOwner.length; c += 1) {
+        const owner = game.cellOwner[c] ?? -1;
+        if (owner >= 0 && owner !== index && regionOfCell(game.world, c)) return c;
+      }
+      return -1;
+    })();
+    store().chooseBuilding('factory');
+    const denied = store().placeAt(foreign);
+    expect(denied.ok).toBe(false);
+    expect(store().notices.length).toBeGreaterThan(0);
+    expect(BUILDINGS.factory.cost).toBeGreaterThan(0);
+  });
+
+  it('mobilises the region of the selected cell', () => {
+    store().startNewGame('velDania'.toLowerCase(), 'normal');
+    const game = store().game!;
+    const cell = ownCellWithSpace();
+    const regionId = regionOfCell(game.world, cell)!.id;
+    const region = game.regions[regionId]!;
+    region.population = 900;
+    region.lastMobilizeTick = -99;
+    game.tick = 500;
+    const country = game.countries[game.playerCountryId]!;
+    country.money = 10_000;
+    const territory = game.world.territories.find((entry) => entry.id === regionId)!;
+    for (const tile of territory.tiles) game.cellArmy[tile] = 0;
+    const result = store().mobilizeRegion(regionId);
+    expect(result.ok).toBe(true);
+    expect(region.population).toBeLessThan(900);
+  });
+
+  it('drafts and confirms an offensive from the selected cell', () => {
+    store().startNewGame('aquilonia', 'normal');
+    const game = store().game!;
+    const index = game.countryOrder.indexOf(game.playerCountryId);
+    let own = -1;
+    let enemy = -1;
+    const width = game.world.width;
+    for (let cell = 0; cell < game.cellOwner.length && enemy < 0; cell += 1) {
+      if ((game.cellOwner[cell] ?? -1) !== index) continue;
+      const x = cell % width;
+      const y = (cell / width) | 0;
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ] as const) {
+        const next = (y + dy) * width + (x + dx);
+        const owner = game.cellOwner[next] ?? -1;
+        if (owner >= 0 && owner !== index) {
+          own = cell;
+          enemy = next;
+          break;
+        }
+      }
+    }
+    expect(own).toBeGreaterThanOrEqual(0);
+    store().selectCell(own);
+    expect(store().draftOffensive(enemy).ok).toBe(true);
+    expect(store().orderDraft?.targetCell).toBe(enemy);
+    expect(store().confirmOffensive(0.5).ok).toBe(true);
+    expect(store().orderDraft).toBeNull();
+    expect(playerOffensive(store().game)).not.toBeNull();
+    expect(store().stopPush().ok).toBe(true);
+    expect(playerOffensive(store().game)).toBeNull();
+  });
+
+  it('keeps selection and notices in sync', () => {
+    store().startNewGame('aquilonia', 'normal');
+    expect(store().selectedCell).toBeNull();
+    store().selectCell(42);
+    expect(store().selectedCell).toBe(42);
+    store().pushNotice('тест');
+    expect(store().notices).toHaveLength(1);
+    const id = store().notices[0]!.id;
+    store().dismissNotice(id);
+    expect(store().notices).toHaveLength(0);
   });
 });
