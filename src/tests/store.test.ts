@@ -146,6 +146,21 @@ describe('game store', () => {
     expect(playerOffensive(store().game)).toBeNull();
   });
 
+  it('restores the autosave when the page is opened again', async () => {
+    store().startNewGame('aquilonia', 'normal');
+    store().advance(1500);
+    const tick = store().game!.tick;
+    expect(await store().saveGame('Автосохранение')).toBe(true);
+
+    // Simulate a reload: the state is gone, only the storage remains.
+    useGameStore.setState({ screen: 'menu', game: null, clock: null, selectedCell: null });
+    await store().bootstrap();
+
+    expect(store().screen).toBe('game');
+    expect(store().game?.tick).toBe(tick);
+    expect(store().clock).not.toBeNull();
+  });
+
   it('keeps selection and notices in sync', () => {
     store().startNewGame('aquilonia', 'normal');
     expect(store().selectedCell).toBeNull();

@@ -53,6 +53,18 @@ export function TopBar({ onMenu }: TopBarProps) {
           <span className="stat__icon">🌍</span>
           <strong>{Math.round(stats.share * 1000) / 10}%</strong>
         </span>
+        {stats.tanks > 0 ? (
+          <span className="stat stat--dim" title="Танки: усиливают атаку и оборону">
+            <span className="stat__icon">🚜</span>
+            <strong>{formatArmy(stats.tanks)}</strong>
+          </span>
+        ) : null}
+        {stats.aircraft > 0 ? (
+          <span className="stat stat--dim" title="Самолёты для авиаударов">
+            <span className="stat__icon">✈</span>
+            <strong>{formatArmy(stats.aircraft)}</strong>
+          </span>
+        ) : null}
       </div>
 
       <div className="topbar__right">
