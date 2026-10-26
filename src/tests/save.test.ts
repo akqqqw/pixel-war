@@ -81,6 +81,17 @@ describe('save serialisation', () => {
     expect(order!.share).toBeCloseTo(0.6, 3);
   });
 
+  it('resets the transient map version on load', () => {
+    const state = played(333);
+    state.mapVersion = 42;
+    const restored = deserializeGame(serializeGame(state));
+    expect(restored.mapVersion).toBe(0);
+    // A broken value never reaches the renderer.
+    const raw = JSON.parse(serializeGame(state)) as Record<string, unknown>;
+    raw.mapVersion = 'брак';
+    expect(deserializeGame(JSON.stringify(raw)).mapVersion).toBe(0);
+  });
+
   it('repairs a broken save instead of crashing', () => {
     const state = played(909);
     const raw = JSON.parse(serializeGame(state)) as Record<string, unknown>;

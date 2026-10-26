@@ -8,6 +8,7 @@ import { useGameStore } from '@/store/gameStore';
 import { TopBar } from '@/ui/hud/TopBar';
 import { BottomPanel } from '@/ui/hud/BottomPanel';
 import { CellPanel } from '@/ui/hud/CellPanel';
+import { CellTooltip } from '@/ui/hud/CellTooltip';
 import { formatMoney } from '@/ui/helpers/format';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -122,6 +123,38 @@ describe('interface', () => {
       buttonByText('Безопасность').click();
     });
     expect(container.querySelector('.strip')).toBeNull();
+  });
+
+  it('shows a one-line tooltip for the cell under the pointer', () => {
+    startGame();
+    const game = useGameStore.getState().game!;
+    const index = game.countryOrder.indexOf(game.playerCountryId);
+    let cell = -1;
+    for (let c = 0; c < game.cellOwner.length && cell < 0; c += 1) {
+      if (game.cellOwner[c] === index) cell = c;
+    }
+    render(<CellTooltip />);
+    expect(container.querySelector('.cell-tip')).toBeNull();
+    act(() => {
+      useGameStore.getState().setHoverCell(cell);
+    });
+    const tip = container.querySelector('.cell-tip');
+    expect(tip).not.toBeNull();
+    expect(tip!.textContent).toContain('⚔️');
+    // Selecting the same cell hides the duplicate readout.
+    act(() => {
+      useGameStore.getState().selectCell(cell);
+    });
+    expect(container.querySelector('.cell-tip')).toBeNull();
+    // Water is reported as sea.
+    const water = Array.from({ length: game.cellOwner.length }, (_, i) => i).find(
+      (i) => (game.world.tileTerritory[i] ?? -1) < 0,
+    )!;
+    act(() => {
+      useGameStore.getState().selectCell(null);
+      useGameStore.getState().setHoverCell(water);
+    });
+    expect(container.querySelector('.cell-tip')!.textContent).toContain('Море');
   });
 
   it('describes the selected cell in a compact panel', () => {

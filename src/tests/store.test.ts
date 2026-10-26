@@ -161,6 +161,19 @@ describe('game store', () => {
     expect(store().clock).not.toBeNull();
   });
 
+  it('tracks the hovered cell without redundant updates', () => {
+    store().startNewGame('aquilonia', 'normal');
+    expect(store().hoverCell).toBeNull();
+    store().setHoverCell(120);
+    expect(store().hoverCell).toBe(120);
+    const state = useGameStore.getState();
+    store().setHoverCell(120);
+    // Same cell → the same store state object, so React does not re-render.
+    expect(useGameStore.getState()).toBe(state);
+    store().setHoverCell(null);
+    expect(store().hoverCell).toBeNull();
+  });
+
   it('keeps selection and notices in sync', () => {
     store().startNewGame('aquilonia', 'normal');
     expect(store().selectedCell).toBeNull();

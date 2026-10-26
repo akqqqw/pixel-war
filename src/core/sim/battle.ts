@@ -156,6 +156,7 @@ export function resolveBattles(state: GameState): BattleResult {
     captured.push(flip.cell);
   }
   state.lastCaptured = captured;
+  if (captured.length > 0) state.mapVersion += 1;
   return { captured, fights };
 }
 

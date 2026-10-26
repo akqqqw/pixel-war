@@ -145,3 +145,18 @@ describe('cell battles', () => {
     expect(total).toBeLessThanOrEqual(before + 1e-6);
   });
 });
+
+describe('map version', () => {
+  it('bumps only when a cell really changes hands', () => {
+    const { state, pair } = setup();
+    clearArmy(state);
+    const before = state.mapVersion;
+    state.cellArmy[pair.mine] = 0;
+    resolveBattles(state);
+    expect(state.mapVersion).toBe(before);
+
+    state.cellArmy[pair.mine] = (cellDefense(state, pair.theirs) + 40) / BALANCE.attackCommitShare;
+    resolveBattles(state);
+    expect(state.mapVersion).toBe(before + 1);
+  });
+});

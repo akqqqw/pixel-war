@@ -160,6 +160,7 @@ export function createGame(options: CreateGameOptions): GameState {
     events: [],
     victory: null,
     lastCaptured: [],
+    mapVersion: 0,
     nextIds: { building: buildingCounter, event: 1, order: 1, strike: 1 },
   };
 
@@ -202,6 +203,7 @@ export function sanitizeGame(state: GameState): void {
   if (!Array.isArray(state.strikes)) state.strikes = [];
   if (!Array.isArray(state.events)) state.events = [];
   if (!Array.isArray(state.lastCaptured)) state.lastCaptured = [];
+  if (!Number.isFinite(state.mapVersion)) state.mapVersion = 0;
 
   for (let cell = 0; cell < size; cell += 1) {
     const owner = state.cellOwner[cell] ?? -1;

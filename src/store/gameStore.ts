@@ -49,6 +49,8 @@ interface GameStore {
   notices: Notice[];
   /** Selected map cell — the only selection the interface needs. */
   selectedCell: number | null;
+  /** Cell under the pointer, shown as a compact tooltip. */
+  hoverCell: number | null;
   buildingChoice: BuildingKind | null;
   orderDraft: OrderDraft | null;
   /** Missile or airfield waiting for a target cell. */
@@ -76,6 +78,7 @@ interface GameStore {
   togglePause: () => void;
 
   selectCell: (cell: number | null) => void;
+  setHoverCell: (cell: number | null) => void;
   chooseBuilding: (kind: BuildingKind | null) => void;
   placeAt: (cell: number) => ActionResult;
   upgradeAt: (buildingId: string) => ActionResult;
@@ -141,6 +144,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   settings: loadSettings(),
   notices: [],
   selectedCell: null,
+  hoverCell: null,
   buildingChoice: null,
   orderDraft: null,
   strikeBuildingId: null,
@@ -182,6 +186,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       screen: 'game',
       revision: get().revision + 1,
       selectedCell: null,
+      hoverCell: null,
       buildingChoice: null,
       orderDraft: null,
       strikeBuildingId: null,
@@ -216,6 +221,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         screen: 'game',
         revision: get().revision + 1,
         selectedCell: null,
+        hoverCell: null,
         buildingChoice: null,
         orderDraft: null,
         strikeBuildingId: null,
@@ -300,6 +306,11 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   },
 
   selectCell: (cell) => set({ selectedCell: cell }),
+
+  setHoverCell: (cell) => {
+    if (get().hoverCell === cell) return;
+    set({ hoverCell: cell });
+  },
 
   chooseBuilding: (kind) => set({ buildingChoice: kind, orderDraft: null, strikeBuildingId: null }),
 

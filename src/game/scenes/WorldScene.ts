@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { BUILDINGS } from '@/core/buildings/buildings';
+import { BUILDINGS, buildingRadius } from '@/core/buildings/buildings';
 import type { BuildingInstance, GameState } from '@/core/state/types';
 import { CameraController } from '@/game/camera/CameraController';
 import {
@@ -39,7 +39,9 @@ export class WorldScene extends Phaser.Scene {
   private regionLabels = new Map<string, Phaser.GameObjects.Text>();
   private capitalLabels = new Map<string, Phaser.GameObjects.Text>();
   private flashes: { cell: number; at: number }[] = [];
-  private lastOwnerSignature = '';
+  /** Cluster icons of a zoomed-out view, clickable as one marker. */
+  private markerHits: { x: number; y: number; cell: number }[] = [];
+  private lastMapVersion = -1;
   private lastRevision = -1;
   private lastSelection: number | null = -2;
   private lastChoice: string | null = '__none__';
@@ -88,7 +90,7 @@ export class WorldScene extends Phaser.Scene {
 
     this.syncMarkers(game);
     this.syncLabels(game);
-    this.lastOwnerSignature = this.ownerSignature(game);
+    this.lastMapVersion = game.mapVersion;
 
     const capital = game.world.territories.find((region) => region.id === game.countries[game.playerCountryId]?.capitalRegionId);
     const focus = capital ?? game.world.territories[0];
@@ -115,8 +117,23 @@ export class WorldScene extends Phaser.Scene {
       if (!pointer.isDown) return;
       moved = Math.max(moved, Math.hypot(pointer.x - downX, pointer.y - downY));
     });
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.isDown) return;
+      if (pointer.wasTouch) return;
+      const store = useGameStore.getState();
+      const cell = this.cellAtPointer(pointer);
+      if (cell === null) {
+        store.setHoverCell(null);
+        return;
+      }
+      // A cluster icon stands for a building, so hovering it tells about that cell.
+      const marker = this.markerAtPointer(pointer);
+      store.setHoverCell(marker ?? cell);
+    });
+    this.input.on('gameout' as string, () => useGameStore.getState().setHoverCell(null));
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
-      if (moved > 10) return;
+      // A finger wobbles more than a mouse — allow a wider tap radius on touch.
+      if (moved > (pointer.wasTouch ? 16 : 10)) return;
       if (this.input.pointer1?.isDown && this.input.pointer1 !== pointer) return;
       if (this.input.pointer2?.isDown && this.input.pointer2 !== pointer) return;
       this.handleClick(pointer);
@@ -131,14 +148,32 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 
-  private handleClick(pointer: Phaser.Input.Pointer): void {
+  /** Cell under the pointer, or null when the pointer is off the map. */
+  private cellAtPointer(pointer: Phaser.Input.Pointer): number | null {
     const game = this.gameRef;
-    if (!game) return;
+    if (!game) return null;
     const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
     const tileX = Math.floor(worldPoint.x / TILE_PIXELS);
     const tileY = Math.floor(worldPoint.y / TILE_PIXELS);
-    if (tileX < 0 || tileY < 0 || tileX >= game.world.width || tileY >= game.world.height) return;
-    const cell = tileY * game.world.width + tileX;
+    if (tileX < 0 || tileY < 0 || tileX >= game.world.width || tileY >= game.world.height) return null;
+    return tileY * game.world.width + tileX;
+  }
+
+  /** Cell of the cluster icon under the pointer (zoomed-out view only). */
+  private markerAtPointer(pointer: Phaser.Input.Pointer): number | null {
+    if (this.cameraController && this.cameraController.zoom >= 1.15) return null;
+    const point = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    for (const hit of this.markerHits) {
+      if (Math.abs(hit.x - point.x) <= 9 && Math.abs(hit.y - point.y) <= 9) return hit.cell;
+    }
+    return null;
+  }
+
+  private handleClick(pointer: Phaser.Input.Pointer): void {
+    const game = this.gameRef;
+    if (!game) return;
+    const cell = this.markerAtPointer(pointer) ?? this.cellAtPointer(pointer);
+    if (cell === null) return;
     const store = useGameStore.getState();
 
     if (store.strikeBuildingId) {
@@ -165,14 +200,6 @@ export class WorldScene extends Phaser.Scene {
     }
     store.cancelDraft();
     store.selectCell(cell);
-  }
-
-  private ownerSignature(game: GameState): string {
-    let signature = '';
-    for (let cell = 0; cell < game.cellOwner.length; cell += 1) {
-      signature += String.fromCharCode(65 + Math.max(0, (game.cellOwner[cell] ?? -1) + 1));
-    }
-    return signature;
   }
 
   private drawBorders(game: GameState): void {
@@ -210,6 +237,7 @@ export class WorldScene extends Phaser.Scene {
   /** Structure icons when zoomed in, one counted cluster per region otherwise. */
   private syncMarkers(game: GameState): void {
     const zoomedIn = this.cameraController ? this.cameraController.zoom >= 1.15 : true;
+    this.markerHits = [];
     const signatures = new Map<string, string>();
     for (const region of Object.values(game.regions)) {
       const key = `r:${region.id}`;
@@ -261,6 +289,10 @@ export class WorldScene extends Phaser.Scene {
               .setDepth(12);
             sprites.push(icon, label);
           });
+          const first = region.buildings[0];
+          if (first) {
+            this.markerHits.push({ x: baseX, y: baseY, cell: first.cell });
+          }
         }
       }
       this.buildingMarkers.set(key, { signature, sprites });
@@ -361,9 +393,26 @@ export class WorldScene extends Phaser.Scene {
       }
     }
 
-    // The structure of the selected cell shows its action radius.
+    // The structure of the selected cell shows its action radius. While a strike
+    // is being aimed, the radius of the chosen launcher is shown in orange.
     const regionIndex = selected !== null ? game.world.tileTerritory[selected] ?? -1 : -1;
     const region = regionIndex >= 0 ? game.regions[game.world.territories[regionIndex]?.id ?? ''] : undefined;
+    const strikeBuilding = store.strikeBuildingId
+      ? Object.values(game.regions)
+          .flatMap((entry) => entry.buildings)
+          .find((entry) => entry.id === store.strikeBuildingId)
+      : undefined;
+    if (strikeBuilding) {
+      const def = BUILDINGS[strikeBuilding.kind];
+      if (def.radius) {
+        const { x, y } = this.cellToPixel(strikeBuilding.cell);
+        const pixels = buildingRadius(strikeBuilding.kind, strikeBuilding.level) * TILE_PIXELS;
+        radius.fillStyle(0xff8a5c, 0.09);
+        radius.fillCircle(x, y, pixels);
+        radius.lineStyle(2, 0xff8a5c, 0.8);
+        radius.strokeCircle(x, y, pixels);
+      }
+    }
     const building = region?.buildings.find((entry) => entry.cell === selected);
     if (building) {
       const def = BUILDINGS[building.kind];
@@ -493,9 +542,8 @@ export class WorldScene extends Phaser.Scene {
 
     if (store.revision !== this.lastRevision) {
       this.lastRevision = store.revision;
-      const signature = this.ownerSignature(game);
-      if (signature !== this.lastOwnerSignature) {
-        this.lastOwnerSignature = signature;
+      if (game.mapVersion !== this.lastMapVersion) {
+        this.lastMapVersion = game.mapVersion;
         repaintOwnerLayer(game.world, game, this.ownerLayer);
         this.drawBorders(game);
         this.buildingMarkers.forEach((marker) => {

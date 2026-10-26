@@ -151,6 +151,11 @@ export interface GameState {
   victory: VictoryInfo | null;
   /** Cells captured during the last tick, used for the map flash. */
   lastCaptured: number[];
+  /**
+   * Bumped every time a cell changes hands. The renderer watches this number
+   * instead of comparing the whole owner map each frame (O(1) instead of O(n)).
+   */
+  mapVersion: number;
   nextIds: { building: number; event: number; order: number; strike: number };
 }
 

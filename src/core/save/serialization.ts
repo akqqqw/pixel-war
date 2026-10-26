@@ -117,6 +117,7 @@ export function deserializeGame(raw: string): GameState {
     events: Array.isArray(parsed.events) ? parsed.events : [],
     victory: parsed.victory ?? null,
     lastCaptured: [],
+    mapVersion: 0,
     nextIds: parsed.nextIds ?? { building: 1, event: 1, order: 1, strike: 1 },
   };
 
