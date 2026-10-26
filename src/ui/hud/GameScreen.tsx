@@ -58,6 +58,17 @@ export function GameScreen() {
     return () => cancelAnimationFrame(frame);
   }, [advance]);
 
+  // Hiding the tab pauses the campaign and coming back restores the speed.
+  useEffect(() => {
+    const onVisibility = (): void => {
+      const store = useGameStore.getState();
+      if (document.hidden) store.pauseForBackground();
+      else store.resumeFromBackground();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.target instanceof HTMLInputElement) return;

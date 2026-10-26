@@ -24,6 +24,10 @@ export function OrderPanel() {
   if (draft) {
     const available = regionArmyOf(game, draft.sourceRegionId, game.playerCountryId);
     const send = Math.floor((available * share) / 100);
+    const targetOwnerIndex = game.cellOwner[draft.targetCell] ?? -1;
+    const targetId = targetOwnerIndex >= 0 ? game.countryOrder[targetOwnerIndex] : null;
+    const target = targetId ? game.countries[targetId] : null;
+    const needsWar = !!target && !game.countries[game.playerCountryId]!.warWith.includes(target.id);
     return (
       <div className="order-panel">
         <div className="order-panel__row">
@@ -41,6 +45,12 @@ export function OrderPanel() {
           <strong className="order-panel__share">{share}%</strong>
           <span className="muted tiny">{formatMoney(send)} солдат</span>
         </div>
+        {target ? (
+          <span className="order-panel__target">
+            Цель: {target.shortName}
+            {needsWar ? ' · будет объявлена война' : ' · идёт война'}
+          </span>
+        ) : null}
         <div className="order-panel__row">
           <button type="button" className="btn btn--primary btn--sm" onClick={() => confirmOffensive(share / 100)}>
             В атаку

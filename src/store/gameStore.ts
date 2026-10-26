@@ -61,6 +61,8 @@ interface GameStore {
   lastStatus: string;
   /** Id of the push that was running on the previous tick. */
   lastOrderId: string | null;
+  /** Speed the game had before the tab was hidden. */
+  speedBeforeHide: GameSpeed | null;
 
   bootstrap: () => Promise<void>;
   refreshSaves: () => Promise<void>;
@@ -76,6 +78,8 @@ interface GameStore {
   advance: (dtMs: number) => void;
   setSpeed: (speed: GameSpeed) => void;
   togglePause: () => void;
+  pauseForBackground: () => void;
+  resumeFromBackground: () => void;
 
   selectCell: (cell: number | null) => void;
   setHoverCell: (cell: number | null) => void;
@@ -153,6 +157,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   lastAutosaveTick: 0,
   lastStatus: 'playing',
   lastOrderId: null,
+  speedBeforeHide: null,
 
   /** Opens the menu and quietly restores the autosave of the previous session. */
   bootstrap: async () => {
@@ -194,6 +199,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       lastAutosaveTick: 0,
       lastStatus: game.status,
       lastOrderId: null,
+      speedBeforeHide: null,
     });
     void get().refreshSaves();
   },
@@ -230,6 +236,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         lastAutosaveTick: game.tick,
         lastStatus: game.status,
         lastOrderId: null,
+        speedBeforeHide: null,
       });
       get().pushNotice('Партия загружена.', 'success');
       return true;
@@ -303,6 +310,22 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const game = get().game;
     if (!game) return;
     get().setSpeed(game.speed === 0 ? 1 : 0);
+  },
+
+  // A hidden tab must not keep the war running behind the player's back.
+  pauseForBackground: () => {
+    const game = get().game;
+    if (!game || game.speed === 0 || get().speedBeforeHide !== null) return;
+    set({ speedBeforeHide: game.speed });
+    get().setSpeed(0);
+  },
+
+  resumeFromBackground: () => {
+    const speed = get().speedBeforeHide;
+    if (speed === null) return;
+    set({ speedBeforeHide: null });
+    const game = get().game;
+    if (game && game.speed === 0 && game.status === 'playing') get().setSpeed(speed);
   },
 
   selectCell: (cell) => set({ selectedCell: cell }),

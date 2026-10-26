@@ -161,6 +161,22 @@ describe('game store', () => {
     expect(store().clock).not.toBeNull();
   });
 
+  it('pauses when the tab is hidden and restores the speed afterwards', () => {
+    store().startNewGame('aquilonia', 'normal');
+    store().setSpeed(4);
+    store().pauseForBackground();
+    expect(store().game!.speed).toBe(0);
+    store().pauseForBackground();
+    expect(store().game!.speed).toBe(0);
+    store().resumeFromBackground();
+    expect(store().game!.speed).toBe(4);
+    expect(store().speedBeforeHide).toBeNull();
+    // A manual pause is not undone by the tab coming back.
+    store().setSpeed(0);
+    store().resumeFromBackground();
+    expect(store().game!.speed).toBe(0);
+  });
+
   it('tracks the hovered cell without redundant updates', () => {
     store().startNewGame('aquilonia', 'normal');
     expect(store().hoverCell).toBeNull();
