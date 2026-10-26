@@ -418,6 +418,21 @@ export class WorldScene extends Phaser.Scene {
   private drawStrikes(game: GameState, time: number): void {
     const gfx = this.strikeGraphics;
     gfx.clear();
+
+    // Pulse on the cell the running offensive is aimed at.
+    const playerIndex = game.countryOrder.indexOf(game.playerCountryId);
+    const order = game.orders.find((entry) => entry.countryId === game.playerCountryId && entry.active);
+    if (order && playerIndex >= 0) {
+      const { x, y } = this.cellToPixel(order.targetCell);
+      const pulse = 0.45 + Math.sin(time / 220) * 0.35;
+      gfx.lineStyle(2, 0xff8a5c, pulse);
+      gfx.strokeRect(
+        x - TILE_PIXELS / 2 - 2,
+        y - TILE_PIXELS / 2 - 2,
+        TILE_PIXELS + 4,
+        TILE_PIXELS + 4,
+      );
+    }
     for (const strike of game.strikes) {
       const progress = Phaser.Math.Clamp((game.tick + 1 - strike.fireAtTick) / 2, 0, 1);
       const from = this.cellToPixel(strike.fromCell);

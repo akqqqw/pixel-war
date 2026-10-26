@@ -19,9 +19,11 @@ export function CellPanel() {
   const makePeaceWith = useGameStore((state) => state.makePeaceWith);
   void revision;
 
+  const drafting = useGameStore((state) => state.orderDraft !== null);
   const info = cellInfo(game, selectedCell);
   const country = playerCountry(game);
-  if (!game || !info || !country || selectedCell === null) return null;
+  // While the share slider is open it takes the place of the cell card.
+  if (!game || !info || !country || selectedCell === null || drafting) return null;
 
   const building = info.building;
   const def = info.buildingDef;
