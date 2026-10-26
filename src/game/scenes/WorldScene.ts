@@ -81,6 +81,10 @@ export class WorldScene extends Phaser.Scene {
 
     this.cameraController = new CameraController(this, width, height);
     this.cameraController.attach(this);
+    this.cameraController.fit();
+    const onResize = (): void => this.cameraController.fit();
+    this.scale.on('resize', onResize);
+    this.events.once('shutdown', () => this.scale.off('resize', onResize));
 
     this.syncMarkers(game);
     this.syncLabels(game);
@@ -513,7 +517,7 @@ export class WorldScene extends Phaser.Scene {
       label.setScale(1 / zoom);
     }
     for (const label of this.regionLabels.values()) {
-      label.setVisible(zoom > 1.35);
+      label.setVisible(zoom > 1.6);
       label.setScale(1 / zoom);
     }
     for (const marker of this.buildingMarkers.values()) {

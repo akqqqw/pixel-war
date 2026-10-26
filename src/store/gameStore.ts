@@ -7,6 +7,7 @@ import { declareWar, makePeace } from '@/core/sim/diplomacy';
 import { regionOfCell } from '@/core/world/cells';
 import {
   activeOffensive,
+  buildFlowField,
   regionCellsOwned,
   retreatOffensive,
   startOffensive,
@@ -56,6 +57,8 @@ interface GameStore {
   loading: boolean;
   lastAutosaveTick: number;
   lastStatus: string;
+  /** Id of the push that was running on the previous tick. */
+  lastOrderId: string | null;
 
   bootstrap: () => Promise<void>;
   refreshSaves: () => Promise<void>;
@@ -145,9 +148,15 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   loading: false,
   lastAutosaveTick: 0,
   lastStatus: 'playing',
+  lastOrderId: null,
 
+  /** Opens the menu and quietly restores the autosave of the previous session. */
   bootstrap: async () => {
     await get().refreshSaves();
+    const state = get();
+    if (state.game || state.screen !== 'menu') return;
+    const autosave = state.saves.find((save) => save.slot === AUTO_SAVE_SLOT);
+    if (autosave) await state.loadGame(AUTO_SAVE_SLOT);
   },
 
   refreshSaves: async () => {
@@ -179,6 +188,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       notices: [],
       lastAutosaveTick: 0,
       lastStatus: game.status,
+      lastOrderId: null,
     });
     void get().refreshSaves();
   },
@@ -213,6 +223,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         loading: false,
         lastAutosaveTick: game.tick,
         lastStatus: game.status,
+        lastOrderId: null,
       });
       get().pushNotice('Партия загружена.', 'success');
       return true;
@@ -257,6 +268,12 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const ticks = clock.advance(dtMs);
     if (ticks === 0) return;
     set({ revision: get().revision + 1 });
+    // The push ended on its own (peace, dead front or no reachable target).
+    const order = playerOffensive(game);
+    if (!order && get().lastOrderId) {
+      get().pushNotice('Наступление остановлено.', 'info');
+    }
+    set({ lastOrderId: order?.id ?? null });
     const autosave = get().settings.autosave;
     if (autosave && game.status === 'playing' && game.tick - get().lastAutosaveTick >= 40) {
       set({ lastAutosaveTick: game.tick });
@@ -363,6 +380,12 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     if (regionCellsOwned(game, regionId, game.playerCountryId) === 0) {
       return { ok: false, message: 'В регионе нет ваших клеток.' };
     }
+    const dist = buildFlowField(game, index, targetCell);
+    let front = 0;
+    for (let cell = 0; cell < dist.length; cell += 1) {
+      if ((dist[cell] ?? -1) === 1 && (game.cellOwner[cell] ?? -1) === index) front += 1;
+    }
+    if (front === 0) return { ok: false, message: 'К этой клетке нет сухопутного фронта.' };
     set({ orderDraft: { sourceRegionId: regionId, targetCell }, buildingChoice: null, strikeBuildingId: null });
     return { ok: true };
   },

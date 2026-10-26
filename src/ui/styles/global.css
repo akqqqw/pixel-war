@@ -518,7 +518,7 @@ canvas {
 
 .toasts {
   position: absolute;
-  top: 54px;
+  top: 84px;
   right: 8px;
   display: flex;
   flex-direction: column;

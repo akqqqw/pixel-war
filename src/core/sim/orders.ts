@@ -82,6 +82,12 @@ export function startOffensive(
   const targetCountry = state.countryOrder[targetIndex]!;
   if (targetCountry === countryId) return fail('Это уже ваша клетка.');
 
+  const countryIndex = countryIndexOf(state, countryId);
+  if (countryIndex < 0) return fail('Государство не найдено.');
+  // The push needs a land front: the target must touch the country's cells.
+  const dist = buildFlowField(state, countryIndex, targetCell);
+  if (frontCells(state, countryIndex, dist) === 0) return fail('К этой клетке нет сухопутного фронта.');
+
   const wanted = Math.max(0.1, Math.min(1, share));
   const army = regionArmy(state, sourceRegionId);
   const committed = Math.floor(army * wanted);

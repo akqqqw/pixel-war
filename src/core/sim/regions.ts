@@ -110,8 +110,13 @@ export function refreshRegionOwnership(state: GameState): OwnershipChange[] {
     recomputeFortification(state);
     for (const order of state.orders) {
       if (!order.active) continue;
-      const source = state.regions[order.sourceRegionId];
-      if (!source || source.owner !== order.countryId) order.active = false;
+      // The push survives a lost region as long as the country still holds a
+      // single cell there; the soldiers themselves live on the cells.
+      const territory = state.world.territories.find((entry) => entry.id === order.sourceRegionId);
+      const index = countryIndexOf(state, order.countryId);
+      const holdsCell =
+        !!territory && index >= 0 && territory.tiles.some((cell) => (state.cellOwner[cell] ?? -1) === index);
+      if (!holdsCell) order.active = false;
     }
   }
   return changes;

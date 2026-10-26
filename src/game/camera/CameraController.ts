@@ -24,6 +24,19 @@ export class CameraController {
     this.camera.setRoundPixels(true);
   }
 
+  /** Covers the viewport with the map — the world always fills the screen. */
+  fit(): void {
+    const zoom = Phaser.Math.Clamp(
+      Math.max(this.camera.width / this.worldWidth, this.camera.height / this.worldHeight),
+      MIN_ZOOM,
+      MAX_ZOOM,
+    );
+    this.targetZoom = zoom;
+    this.camera.setZoom(zoom);
+    this.camera.centerOn(this.worldWidth / 2, this.worldHeight / 2);
+    this.clampScroll();
+  }
+
   get zoom(): number {
     return this.camera.zoom;
   }

@@ -17,11 +17,13 @@ export function formatSigned(value: number, digits = 1): string {
   return `${rounded > 0 ? '+' : ''}${rounded}`;
 }
 
-/** Population is stored in thousands: 240 -> "240 тыс." */
+/** 45 200 -> "45 тыс.", 2 300 000 -> "2,30 млн". */
 export function formatPopulation(value: number): string {
   const safe = Math.max(0, Number.isFinite(value) ? value : 0);
-  if (safe >= 1000) return `${(safe / 1000).toFixed(2).replace('.', ',')} млн`;
-  return `${formatInt(safe)} тыс.`;
+  if (safe >= 1_000_000) return `${(safe / 1_000_000).toFixed(2).replace('.', ',')} млн`;
+  if (safe >= 10_000) return `${Math.round(safe / 1000)} тыс.`;
+  if (safe >= 1000) return `${(safe / 1000).toFixed(1).replace('.', ',')} тыс.`;
+  return formatInt(safe);
 }
 
 export function formatArmy(value: number): string {
