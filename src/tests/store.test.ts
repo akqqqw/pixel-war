@@ -177,6 +177,29 @@ describe('game store', () => {
     expect(store().game!.speed).toBe(0);
   });
 
+  it('unlocks achievements once and keeps them in storage', () => {
+    store().startNewGame('aquilonia', 'normal');
+    const game = store().game!;
+    expect(store().achievements).toEqual([]);
+    game.countries[game.playerCountryId]!.stats.cellsTaken = 1;
+    store().syncAchievements();
+    expect(store().achievements).toContain('first_capture');
+    expect(store().notices.some((notice) => notice.text.includes('Достижение'))).toBe(true);
+    expect(localStorage.getItem('pixel-war-achievements-v1')).toContain('first_capture');
+
+    const count = store().notices.length;
+    store().syncAchievements();
+    // Nothing new → no second toast, no duplicate in the list.
+    expect(store().notices.length).toBe(count);
+    expect(store().achievements.filter((id) => id === 'first_capture')).toHaveLength(1);
+  });
+
+  it('mirrors the save into the platform cloud slot', async () => {
+    store().startNewGame('aquilonia', 'normal');
+    expect(await store().saveGame('Автосохранение')).toBe(true);
+    expect(localStorage.getItem('pixel-war-cloud-auto')).toContain('"cellOwner"');
+  });
+
   it('tracks the hovered cell without redundant updates', () => {
     store().startNewGame('aquilonia', 'normal');
     expect(store().hoverCell).toBeNull();

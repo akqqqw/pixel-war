@@ -157,6 +157,8 @@ export function resolveBattles(state: GameState): BattleResult {
     if (previous < 0) continue;
     state.cellOwner[flip.cell] = flip.to;
     state.cellArmy[flip.cell] = Math.round(flip.survivors * 10) / 10;
+    const taker = state.countries[state.countryOrder[flip.to]!];
+    if (taker) taker.stats.cellsTaken += 1;
     captured.push(flip.cell);
   }
   state.lastCaptured = captured;

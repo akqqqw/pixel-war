@@ -3,6 +3,7 @@ import { useGameStore } from '@/store/gameStore';
 import { Modal } from '@/ui/components/Modal';
 import { formatGameDate } from '@/core/time/gameDate';
 import { Sparkline } from '@/ui/components/Sparkline';
+import { Achievements } from '@/ui/hud/Achievements';
 import { countCells } from '@/core/sim/regions';
 import { territoryShare } from '@/core/sim/effects';
 
@@ -108,6 +109,8 @@ export function MenuDialog({ onClose, onExit }: MenuDialogProps) {
           </ul>
         )}
       </div>
+      <Achievements />
+
       <div className="menu-section">
         <label className="row row--between">
           <span>Автосохранение</span>

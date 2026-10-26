@@ -6,6 +6,7 @@ import { TopBar } from '@/ui/hud/TopBar';
 import { BottomPanel } from '@/ui/hud/BottomPanel';
 import { CellPanel } from '@/ui/hud/CellPanel';
 import { CellTooltip } from '@/ui/hud/CellTooltip';
+import { Coach } from '@/ui/hud/Coach';
 import { OrderPanel } from '@/ui/hud/OrderPanel';
 import { VictoryModal } from '@/ui/hud/VictoryModal';
 import { MenuDialog } from '@/ui/hud/MenuDialog';
@@ -112,6 +113,7 @@ export function GameScreen() {
       <TopBar onMenu={() => setMenuOpen(true)} />
       <OrderPanel />
       <CellTooltip />
+      <Coach />
       <CellPanel />
       <BottomPanel />
       <button type="button" className="help-btn" onClick={() => setHelpOpen(true)} title="Как играть">

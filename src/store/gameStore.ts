@@ -17,9 +17,18 @@ import type { ActionResult } from '@/core/sim/result';
 import { GameClock } from '@/core/sim/simulation';
 import { findBuilding, fireMissile, launchAirStrike } from '@/core/sim/strikes';
 import { createGame, sanitizeGame } from '@/core/state/createGame';
+import { territoryShare } from '@/core/sim/effects';
 import type { Difficulty, GameSpeed, GameState } from '@/core/state/types';
 import type { CountryId, TerritoryId } from '@/core/types';
 import { AUTO_SAVE_SLOT, deleteSave as removeSave, listSaves, loadSave, writeSave, type SaveMeta } from '@/services/saveGame';
+import {
+  achievementById,
+  loadUnlocked,
+  metAchievements,
+  newAchievements,
+  saveUnlocked,
+} from '@/services/achievements';
+import { platform, type AchievementId } from '@/services/platform';
 import { sound, soundForStatus } from '@/services/audio';
 
 export type Screen = 'menu' | 'countrySelect' | 'game';
@@ -49,6 +58,8 @@ interface GameStore {
   saves: SaveMeta[];
   settings: Settings;
   notices: Notice[];
+  /** Unlocked achievements, kept between campaigns. */
+  achievements: AchievementId[];
   /** Selected map cell — the only selection the interface needs. */
   selectedCell: number | null;
   /** Cell under the pointer, shown as a compact tooltip. */
@@ -106,6 +117,8 @@ interface GameStore {
   makePeaceWith: (countryId: CountryId) => ActionResult;
   setAutosave: (enabled: boolean) => void;
   setSound: (enabled: boolean) => void;
+  /** Re-checks the campaign goals; called by the tick loop. */
+  syncAchievements: () => void;
   pushNotice: (text: string, kind?: Notice['kind']) => void;
   dismissNotice: (id: string) => void;
 }
@@ -153,6 +166,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   saves: [],
   settings: storedSettings,
   notices: [],
+  achievements: loadUnlocked(),
   selectedCell: null,
   hoverCell: null,
   buildingChoice: null,
@@ -165,13 +179,39 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   lastOrderId: null,
   speedBeforeHide: null,
 
-  /** Opens the menu and quietly restores the autosave of the previous session. */
+  /**
+   * Opens the menu, restores the autosave of the previous session and — when the
+   * hosting platform offers cloud saves — falls back to them if the browser
+   * storage was cleared.
+   */
   bootstrap: async () => {
+    await platform.init();
     await get().refreshSaves();
     const state = get();
     if (state.game || state.screen !== 'menu') return;
+
     const autosave = state.saves.find((save) => save.slot === AUTO_SAVE_SLOT);
-    if (autosave) await state.loadGame(AUTO_SAVE_SLOT);
+    if (autosave) {
+      await state.loadGame(AUTO_SAVE_SLOT);
+      return;
+    }
+    const cloud = await platform.loadFromCloud(AUTO_SAVE_SLOT);
+    if (!cloud) return;
+    try {
+      const game = deserializeGame(cloud);
+      sanitizeGame(game);
+      set({
+        game,
+        clock: new GameClock(game),
+        screen: 'game',
+        revision: get().revision + 1,
+        lastAutosaveTick: game.tick,
+        lastStatus: game.status,
+      });
+      get().pushNotice('Партия восстановлена из облака.', 'success');
+    } catch {
+      // A broken cloud record must not block the menu.
+    }
   },
 
   refreshSaves: async () => {
@@ -188,6 +228,8 @@ export const useGameStore = create<GameStore>()((set, get) => ({
   chooseCountry: (countryId) => set({ pendingCountry: countryId, screen: 'countrySelect' }),
 
   startNewGame: (countryId, difficulty) => {
+    // Interstitial between campaigns: instantly resolved in the offline build.
+    void platform.showFullscreenAd();
     const seed = Math.floor(Math.random() * 1_000_000_000);
     const game = createGame({ seed, playerCountryId: countryId, difficulty });
     const clock = new GameClock(game);
@@ -261,6 +303,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const name = label ?? `${country?.shortName ?? 'Партия'} · ${game.tick} тик`;
     try {
       await writeSave(slot, name, game);
+      if (platform.hasCloud) await platform.saveToCloud(slot, serializeGame(game));
       await get().refreshSaves();
       if (slot !== AUTO_SAVE_SLOT) get().pushNotice('Сохранено.', 'success');
       return true;
@@ -298,10 +341,17 @@ export const useGameStore = create<GameStore>()((set, get) => ({
       set({ lastAutosaveTick: game.tick });
       void get().saveGame('Автосохранение');
     }
+    get().syncAchievements();
     if (game.status !== 'playing' && game.status !== get().lastStatus) {
       set({ lastStatus: game.status });
       sound.play(soundForStatus(game.status === 'victory' ? 'victory' : 'defeat'));
+      if (game.status === 'victory') {
+        const share = Math.round(territoryShare(game, game.playerCountryId) * 1000);
+        void platform.submitScore('land_share', share);
+        void platform.submitScore('fastest_victory', Math.max(1, 100_000 - game.tick));
+      }
       void get().saveGame('Автосохранение');
+      get().syncAchievements();
     }
   },
 
@@ -528,6 +578,24 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const settings: Settings = { ...get().settings, autosave: enabled };
     persistSettings(settings);
     set({ settings });
+  },
+
+  syncAchievements: () => {
+    const game = get().game;
+    if (!game) return;
+    const unlocked = get().achievements;
+    const fresh = newAchievements(metAchievements(game), unlocked);
+    if (fresh.length === 0) return;
+    const next = [...unlocked, ...fresh];
+    set({ achievements: next });
+    saveUnlocked(next);
+    for (const id of fresh) {
+      const def = achievementById(id);
+      if (!def) continue;
+      void platform.unlockAchievement(id);
+      get().pushNotice(`Достижение: ${def.name}`, 'success');
+      sound.play('upgrade');
+    }
   },
 
   setSound: (enabled) => {

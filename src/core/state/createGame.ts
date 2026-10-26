@@ -75,7 +75,7 @@ export function createGame(options: CreateGameOptions): GameState {
       lastMobilizeTick: -99,
       tankProgress: 0,
       aircraftProgress: 0,
-      stats: { built: 0, captured: 0, lost: 0, missiles: 0, airStrikes: 0 },
+      stats: { built: 0, captured: 0, cellsTaken: 0, lost: 0, missiles: 0, airStrikes: 0 },
     };
   }
 

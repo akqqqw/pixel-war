@@ -61,7 +61,10 @@ export interface CountryState {
   aircraftProgress: number;
   stats: {
     built: number;
+    /** Regions taken from an enemy. */
     captured: number;
+    /** Single cells taken from an enemy — the finest war progress. */
+    cellsTaken: number;
     lost: number;
     missiles: number;
     airStrikes: number;

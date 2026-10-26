@@ -9,6 +9,8 @@ import { TopBar } from '@/ui/hud/TopBar';
 import { BottomPanel } from '@/ui/hud/BottomPanel';
 import { CellPanel } from '@/ui/hud/CellPanel';
 import { CellTooltip } from '@/ui/hud/CellTooltip';
+import { MenuDialog } from '@/ui/hud/MenuDialog';
+import { Coach } from '@/ui/hud/Coach';
 import { formatMoney } from '@/ui/helpers/format';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -171,6 +173,77 @@ describe('interface', () => {
       useGameStore.getState().setHoverCell(water);
     });
     expect(container.querySelector('.cell-tip')!.textContent).toContain('Море');
+  });
+
+  it('lists the campaign goals in the party menu', async () => {
+    startGame();
+    render(<MenuDialog onClose={() => undefined} onExit={() => undefined} />);
+    // The dialog refreshes the save list on mount; let that promise settle.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('Достижения · 0/8');
+    expect(container.textContent).toContain('Первая кровь');
+    expect(container.textContent).toContain('Победитель');
+    expect(container.querySelectorAll('.achievement')).toHaveLength(8);
+    expect(container.textContent).toContain('Земля в этой партии');
+  });
+
+  it('walks a first campaign through three coached steps', () => {
+    startGame();
+    const game = useGameStore.getState().game!;
+    const player = game.countryOrder.indexOf(game.playerCountryId);
+
+    render(<Coach />);
+    expect(container.querySelector('.coach')).not.toBeNull();
+    expect(container.textContent).toContain('Своя клетка');
+
+    // Step 1: pick an own cell.
+    const own = Array.from({ length: game.cellOwner.length }, (_, i) => i).find(
+      (cell) => game.cellOwner[cell] === player,
+    )!;
+    act(() => {
+      useGameStore.getState().selectCell(own);
+    });
+    expect(container.textContent).toContain('Направление удара');
+
+    // Step 2: give an order — the card moves on to the economy step.
+    act(() => {
+      const state = useGameStore.getState();
+      const fakeOrder = {
+        id: 'test-order',
+        countryId: state.game!.playerCountryId,
+        sourceRegionId: 'x',
+        targetCell: own,
+        share: 0.5,
+        committed: 1,
+        delivered: 0,
+        active: true,
+        stalledTicks: 0,
+        startedAtTick: 0,
+      };
+      state.game!.orders.push(fakeOrder);
+      useGameStore.setState({ revision: state.revision + 1 });
+    });
+    expect(container.textContent).toContain('Экономика');
+
+    // Step 3: build something — the coach disappears for good.
+    act(() => {
+      useGameStore.getState().game!.countries[useGameStore.getState().game!.playerCountryId]!.stats.built = 1;
+      useGameStore.setState({ revision: useGameStore.getState().revision + 1 });
+    });
+    expect(container.querySelector('.coach')).toBeNull();
+    expect(localStorage.getItem('pixel-war-coach-v1')).toBe('done');
+  });
+
+  it('can be dismissed and stays hidden', () => {
+    startGame();
+    render(<Coach />);
+    act(() => {
+      buttonByText('✕').click();
+    });
+    expect(container.querySelector('.coach')).toBeNull();
+    expect(localStorage.getItem('pixel-war-coach-v1')).toBe('done');
   });
 
   it('describes the selected cell in a compact panel', () => {
