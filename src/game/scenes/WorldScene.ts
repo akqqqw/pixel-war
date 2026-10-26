@@ -13,6 +13,7 @@ import {
   type OwnerLayer,
 } from '@/game/render/GameTextures';
 import { TILE_PIXELS } from '@/game/sprites/terrainPainter';
+import { sound } from '@/services/audio';
 import { useGameStore } from '@/store/gameStore';
 
 interface Marker {
@@ -496,6 +497,20 @@ export class WorldScene extends Phaser.Scene {
         gfx.fillRect(x - size, y - size, size * 2, size * 2);
       }
     }
+    // Short sparks where the frontline actually fought this tick.
+    if (this.cameraController && this.cameraController.zoom >= 0.85) {
+      const owner = game.countryOrder.indexOf(game.playerCountryId);
+      for (let index = 0; index < game.lastFights.length; index += 1) {
+        const cell = game.lastFights[index]!;
+        const mine = (game.cellOwner[cell] ?? -1) === owner;
+        const flicker = Math.sin(time / 70 + index * 1.7);
+        if (flicker < 0) continue;
+        const { x, y } = this.cellToPixel(cell);
+        gfx.fillStyle(mine ? 0xffe9a8 : 0xff8a5c, 0.28 + flicker * 0.35);
+        gfx.fillRect(x - 1, y - 1, 2, 2);
+      }
+    }
+
     for (const flash of this.flashes) {
       const age = time - flash.at;
       if (age > 450) continue;
@@ -509,8 +524,17 @@ export class WorldScene extends Phaser.Scene {
 
   private handleCaptures(game: GameState): void {
     const now = this.time.now;
-    for (const cell of game.lastCaptured) this.flashes.push({ cell, at: now });
+    const owner = game.countryOrder.indexOf(game.playerCountryId);
+    let gained = 0;
+    let lost = 0;
+    for (const cell of game.lastCaptured) {
+      this.flashes.push({ cell, at: now });
+      if ((game.cellOwner[cell] ?? -1) === owner) gained += 1;
+      else lost += 1;
+    }
     if (game.lastCaptured.length > 0) this.cameras.main.shake(90, 0.0015);
+    if (gained > 0) sound.play('capture');
+    else if (lost > 0) sound.play('lost');
     this.flashes = this.flashes.filter((flash) => now - flash.at < 500);
   }
 

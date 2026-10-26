@@ -44,6 +44,15 @@ describe('save serialisation', () => {
     expect(SAVE_VERSION).toBeGreaterThanOrEqual(3);
   });
 
+  it('keeps the campaign graph across a reload', () => {
+    const state = played(707);
+    expect(state.history.length).toBeGreaterThan(0);
+    const restored = deserializeGame(serializeGame(state));
+    expect(restored.history.length).toBe(state.history.length);
+    expect(restored.history[0]!.share).toEqual(state.history[0]!.share);
+    expect(restored.history.at(-1)!.tick).toBe(state.history.at(-1)!.tick);
+  });
+
   it('keeps an active offensive after a reload', () => {
     const state = played(707);
     const player = state.playerCountryId;

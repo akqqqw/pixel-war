@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPhaserGame } from '@/game/PhaserGame';
+import { sound } from '@/services/audio';
 import { useGameStore } from '@/store/gameStore';
 import { TopBar } from '@/ui/hud/TopBar';
 import { BottomPanel } from '@/ui/hud/BottomPanel';
@@ -57,6 +58,17 @@ export function GameScreen() {
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
   }, [advance]);
+
+  // Browsers only allow audio after a gesture, so the first tap unlocks it.
+  useEffect(() => {
+    const unlock = (): void => sound.unlock();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
 
   // Hiding the tab pauses the campaign and coming back restores the speed.
   useEffect(() => {

@@ -20,6 +20,7 @@ import { createGame, sanitizeGame } from '@/core/state/createGame';
 import type { Difficulty, GameSpeed, GameState } from '@/core/state/types';
 import type { CountryId, TerritoryId } from '@/core/types';
 import { AUTO_SAVE_SLOT, deleteSave as removeSave, listSaves, loadSave, writeSave, type SaveMeta } from '@/services/saveGame';
+import { sound, soundForStatus } from '@/services/audio';
 
 export type Screen = 'menu' | 'countrySelect' | 'game';
 
@@ -31,6 +32,7 @@ export interface Notice {
 
 export interface Settings {
   autosave: boolean;
+  sound: boolean;
 }
 
 /** Direction chosen by the player: the slider is open until it is confirmed. */
@@ -103,12 +105,13 @@ interface GameStore {
   declareWarOn: (countryId: CountryId) => ActionResult;
   makePeaceWith: (countryId: CountryId) => ActionResult;
   setAutosave: (enabled: boolean) => void;
+  setSound: (enabled: boolean) => void;
   pushNotice: (text: string, kind?: Notice['kind']) => void;
   dismissNotice: (id: string) => void;
 }
 
-const SETTINGS_KEY = 'pixel-war-settings-v3';
-const DEFAULT_SETTINGS: Settings = { autosave: true };
+const SETTINGS_KEY = 'pixel-war-settings-v4';
+const DEFAULT_SETTINGS: Settings = { autosave: true, sound: true };
 
 function loadSettings(): Settings {
   try {
@@ -139,13 +142,16 @@ function regionAt(state: GameState, cell: number): TerritoryId | null {
   return region ? region.id : null;
 }
 
+const storedSettings = loadSettings();
+sound.setEnabled(storedSettings.sound);
+
 export const useGameStore = create<GameStore>()((set, get) => ({
   screen: 'menu',
   game: null,
   clock: null,
   revision: 0,
   saves: [],
-  settings: loadSettings(),
+  settings: storedSettings,
   notices: [],
   selectedCell: null,
   hoverCell: null,
@@ -294,6 +300,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     }
     if (game.status !== 'playing' && game.status !== get().lastStatus) {
       set({ lastStatus: game.status });
+      sound.play(soundForStatus(game.status === 'victory' ? 'victory' : 'defeat'));
       void get().saveGame('Автосохранение');
     }
   },
@@ -348,6 +355,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const result = build(game, game.playerCountryId, regionId, buildingChoice, cell);
     if (result.ok) {
       set({ revision: get().revision + 1, selectedCell: cell });
+      sound.play('build');
       const def = BUILDINGS[buildingChoice];
       get().pushNotice(`${def.name} построен.`, 'success');
       const built = game.regions[regionId]?.buildings.filter((b) => b.kind === buildingChoice).length ?? 0;
@@ -363,7 +371,10 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     if (!game) return { ok: false, message: 'Нет партии.' };
     const found = findBuilding(game, buildingId);
     const result = upgradeBuilding(game, game.playerCountryId, buildingId);
-    if (result.ok) set({ revision: get().revision + 1 });
+    if (result.ok) {
+      set({ revision: get().revision + 1 });
+      sound.play('upgrade');
+    }
     else if (result.message) get().pushNotice(result.message, 'danger');
     if (result.ok && found) get().pushNotice('Улучшено.', 'success');
     return result;
@@ -391,6 +402,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const result = mobilize(game, countryId, regionId, max);
     if (result.ok) {
       set({ revision: get().revision + 1 });
+      sound.play('mobilize');
       get().pushNotice(`Мобилизовано ${max} солдат.`, 'success');
     } else if (result.message) {
       get().pushNotice(result.message, 'danger');
@@ -476,6 +488,7 @@ export const useGameStore = create<GameStore>()((set, get) => ({
         : launchAirStrike(game, game.playerCountryId, buildingId, cell);
     if (result.ok) {
       set({ revision: get().revision + 1, strikeBuildingId: null });
+      sound.play('missile');
       get().pushNotice(building.kind === 'missile' ? 'Ракета запущена.' : 'Самолёты вылетели.', 'success');
     } else if (result.message) {
       get().pushNotice(result.message, 'danger');
@@ -515,6 +528,14 @@ export const useGameStore = create<GameStore>()((set, get) => ({
     const settings: Settings = { ...get().settings, autosave: enabled };
     persistSettings(settings);
     set({ settings });
+  },
+
+  setSound: (enabled) => {
+    const settings: Settings = { ...get().settings, sound: enabled };
+    persistSettings(settings);
+    sound.setEnabled(enabled);
+    set({ settings });
+    if (enabled) sound.play('build');
   },
 
   pushNotice: (text, kind = 'info') => {

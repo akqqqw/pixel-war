@@ -160,6 +160,8 @@ export function createGame(options: CreateGameOptions): GameState {
     events: [],
     victory: null,
     lastCaptured: [],
+    lastFights: [],
+    history: [],
     mapVersion: 0,
     nextIds: { building: buildingCounter, event: 1, order: 1, strike: 1 },
   };
@@ -203,6 +205,11 @@ export function sanitizeGame(state: GameState): void {
   if (!Array.isArray(state.strikes)) state.strikes = [];
   if (!Array.isArray(state.events)) state.events = [];
   if (!Array.isArray(state.lastCaptured)) state.lastCaptured = [];
+  if (!Array.isArray(state.lastFights)) state.lastFights = [];
+  if (!Array.isArray(state.history)) state.history = [];
+  state.history = state.history.filter(
+    (sample) => !!sample && Number.isFinite(sample.tick) && Array.isArray(sample.share),
+  );
   if (!Number.isFinite(state.mapVersion)) state.mapVersion = 0;
 
   for (let cell = 0; cell < size; cell += 1) {

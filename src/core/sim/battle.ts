@@ -69,11 +69,14 @@ export function resolveBattles(state: GameState): BattleResult {
 
   if (defenders.length === 0) {
     state.lastCaptured = [];
+    state.lastFights = [];
     return { captured: [], fights: 0 };
   }
 
   const delta = new Float32Array(size);
   const flips: Flip[] = [];
+  const hot: number[] = [];
+  const MAX_HOT = 160;
   let fights = 0;
 
   for (const cell of defenders) {
@@ -107,6 +110,7 @@ export function resolveBattles(state: GameState): BattleResult {
 
     if (attackTotal <= 0) continue;
     fights += 1;
+    if (hot.length < MAX_HOT) hot.push(cell);
 
     if (attackTotal > defence * BALANCE.captureRatio) {
       // The cell falls. Every attacker spends the troops it committed.
@@ -156,6 +160,7 @@ export function resolveBattles(state: GameState): BattleResult {
     captured.push(flip.cell);
   }
   state.lastCaptured = captured;
+  state.lastFights = hot;
   if (captured.length > 0) state.mapVersion += 1;
   return { captured, fights };
 }

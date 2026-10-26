@@ -69,6 +69,13 @@ export interface CountryState {
 }
 
 /** A planned push: troops walk from the source region towards the target cell. */
+/** One point of the campaign graph: land share of every country. */
+export interface HistorySample {
+  tick: number;
+  /** Share of the land map per country index in `countryOrder`, 0..1. */
+  share: number[];
+}
+
 export interface OffensiveOrder {
   id: string;
   countryId: CountryId;
@@ -151,6 +158,10 @@ export interface GameState {
   victory: VictoryInfo | null;
   /** Cells captured during the last tick, used for the map flash. */
   lastCaptured: number[];
+  /** Cells where a fight was resolved this tick (sampled), used for sparks. */
+  lastFights: number[];
+  /** Coarse campaign graph, sampled every `BALANCE.historyInterval` ticks. */
+  history: HistorySample[];
   /**
    * Bumped every time a cell changes hands. The renderer watches this number
    * instead of comparing the whole owner map each frame (O(1) instead of O(n)).

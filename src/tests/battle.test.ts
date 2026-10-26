@@ -146,6 +146,27 @@ describe('cell battles', () => {
   });
 });
 
+describe('frontline feedback', () => {
+  it('reports the cells that actually fought', () => {
+    const { state, pair } = setup();
+    clearArmy(state);
+    state.cellArmy[pair.mine] = (cellDefense(state, pair.theirs) + 40) / BALANCE.attackCommitShare;
+    const result = resolveBattles(state);
+    expect(result.fights).toBeGreaterThan(0);
+    expect(state.lastFights).toContain(pair.theirs);
+    expect(state.lastFights.length).toBeLessThanOrEqual(160);
+  });
+
+  it('clears the fight list when nobody is at war', () => {
+    const { state, player, enemy } = setup();
+    state.countries[player]!.warWith = [];
+    state.countries[enemy]!.warWith = [];
+    for (let cell = 0; cell < state.cellArmy.length; cell += 1) state.cellArmy[cell] = 50;
+    resolveBattles(state);
+    expect(state.lastFights).toHaveLength(0);
+  });
+});
+
 describe('map version', () => {
   it('bumps only when a cell really changes hands', () => {
     const { state, pair } = setup();

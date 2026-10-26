@@ -92,6 +92,10 @@ export const BALANCE = {
   capturedBuildingShare: 0.5,
 
   // ---------- AI ----------
+  /** One point of the campaign graph every N ticks (20 ticks = 10 seconds). */
+  historyInterval: 20,
+  /** Points kept in the graph — older samples are dropped. */
+  historyLength: 180,
   aiInterval: { easy: 18, normal: 12, hard: 8 },
   earlyWarTick: { easy: 260, normal: 180, hard: 110 },
   aiWarRatio: { easy: 1.9, normal: 1.45, hard: 1.2 },

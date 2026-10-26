@@ -94,6 +94,23 @@ describe('simulation loop', () => {
     expect(lost.status).toBe('defeat');
   });
 
+  it('records the campaign graph and keeps it bounded', () => {
+    const state = game(808);
+    expect(state.history).toHaveLength(0);
+    for (let i = 0; i < 60; i += 1) runTick(state);
+    expect(state.history.length).toBeGreaterThan(1);
+    const first = state.history[0]!;
+    expect(first.share).toHaveLength(state.countryOrder.length);
+    const total = first.share.reduce((sum, value) => sum + value, 0);
+    expect(total).toBeGreaterThan(0.9);
+    expect(total).toBeLessThanOrEqual(1.001);
+    // Ticks grow monotonically and the buffer never exceeds the limit.
+    for (let i = 1; i < state.history.length; i += 1) {
+      expect(state.history[i]!.tick).toBeGreaterThan(state.history[i - 1]!.tick);
+    }
+    expect(state.history.length).toBeLessThanOrEqual(180);
+  });
+
   it('keeps the whole world consistent over a long run', () => {
     const state = game(555);
     for (let i = 0; i < 300; i += 1) runTick(state);

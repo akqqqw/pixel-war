@@ -6,6 +6,7 @@ import {
   type GameSpeed,
   type GameState,
   type GameStatus,
+  type HistorySample,
   type OffensiveOrder,
   type RegionState,
   type Strike,
@@ -35,6 +36,7 @@ export interface SerializedGame {
   strikes: Strike[];
   events: GameEvent[];
   victory: VictoryInfo | null;
+  history?: HistorySample[];
   nextIds: GameState['nextIds'];
 }
 
@@ -56,6 +58,7 @@ export function serializeGame(state: GameState): string {
     strikes: state.strikes,
     events: state.events.slice(-40),
     victory: state.victory,
+    history: state.history,
     nextIds: state.nextIds,
   };
   return JSON.stringify(data);
@@ -117,6 +120,8 @@ export function deserializeGame(raw: string): GameState {
     events: Array.isArray(parsed.events) ? parsed.events : [],
     victory: parsed.victory ?? null,
     lastCaptured: [],
+    lastFights: [],
+    history: Array.isArray(parsed.history) ? parsed.history : [],
     mapVersion: 0,
     nextIds: parsed.nextIds ?? { building: 1, event: 1, order: 1, strike: 1 },
   };

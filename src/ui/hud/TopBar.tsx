@@ -19,6 +19,8 @@ export function TopBar({ onMenu }: TopBarProps) {
   const revision = useGameStore((state) => state.revision);
   const setSpeed = useGameStore((state) => state.setSpeed);
   const togglePause = useGameStore((state) => state.togglePause);
+  const setSound = useGameStore((state) => state.setSound);
+  const soundOn = useGameStore((state) => state.settings.sound);
   void revision;
 
   const country = playerCountry(game);
@@ -89,6 +91,15 @@ export function TopBar({ onMenu }: TopBarProps) {
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          className={`icon-btn ${soundOn ? '' : 'icon-btn--muted'}`}
+          onClick={() => setSound(!soundOn)}
+          title={soundOn ? 'Выключить звук' : 'Включить звук'}
+          aria-pressed={soundOn}
+        >
+          {soundOn ? '🔊' : '🔇'}
+        </button>
         <button type="button" className="icon-btn" onClick={onMenu} title="Меню и сохранения">
           ☰
         </button>

@@ -5,6 +5,7 @@ import {
   recomputeFortification,
   regionArmy,
   regionIncome,
+  territoryShare,
 } from '@/core/sim/effects';
 import { pushEvent } from '@/core/sim/events';
 import type { GameState, RegionState } from '@/core/state/types';
@@ -128,6 +129,7 @@ export function refreshTotals(state: GameState): void {
     region.army = Math.round(regionArmy(state, region.id) * 10) / 10;
     region.income = regionIncome(region);
   }
+  sampleHistory(state);
   for (const country of Object.values(state.countries)) {
     country.army = Math.round(countryArmy(state, country.id) * 10) / 10;
     country.population = Math.round(countryPopulation(state, country.id));
@@ -141,6 +143,20 @@ export function refreshTotals(state: GameState): void {
     const upkeep = country.army * BALANCE.armyUpkeepPerSoldierPerSecond;
     country.income = Math.round((gross - upkeep) * 10) / 10;
   }
+}
+
+/**
+ * Keeps a coarse graph of the war: one point every `historyInterval` ticks with
+ * the land share of each country. Old points fall out, so a save stays small.
+ */
+function sampleHistory(state: GameState): void {
+  if (!Array.isArray(state.history)) state.history = [];
+  if (state.tick <= 0 || state.tick % BALANCE.historyInterval !== 0) return;
+  const share = state.countryOrder.map((id) => Math.round(territoryShare(state, id) * 1000) / 1000);
+  const last = state.history[state.history.length - 1];
+  if (last && last.tick === state.tick) return;
+  state.history.push({ tick: state.tick, share });
+  if (state.history.length > BALANCE.historyLength) state.history.splice(0, state.history.length - BALANCE.historyLength);
 }
 
 /** Land cells of a country. */

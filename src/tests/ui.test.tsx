@@ -96,6 +96,22 @@ describe('interface', () => {
     expect(useGameStore.getState().game!.speed).toBe(1);
   });
 
+  it('toggles sound from the top bar and remembers it', () => {
+    startGame();
+    render(<TopBar onMenu={() => undefined} />);
+    expect(useGameStore.getState().settings.sound).toBe(true);
+    act(() => {
+      buttonByText('🔊').click();
+    });
+    expect(useGameStore.getState().settings.sound).toBe(false);
+    expect(container.textContent).toContain('🔇');
+    expect(localStorage.getItem('pixel-war-settings-v4')).toContain('"sound":false');
+    act(() => {
+      buttonByText('🔇').click();
+    });
+    expect(useGameStore.getState().settings.sound).toBe(true);
+  });
+
   it('opens a building tab and arms the placement mode', () => {
     startGame();
     render(<BottomPanel />);
