@@ -16,9 +16,9 @@ export function MainMenu() {
       <div className="menu__inner">
         <p className="menu__eyebrow">Пиксельная военная стратегия</p>
         <h1 className="menu__title">
-          МИРОВОЕ
+          PIXEL
           <br />
-          ГОСПОДСТВО
+          WORLD WAR
         </h1>
         <p className="menu__subtitle">
           Экономика, оружие и безопасность. Ведите армию по клеткам, стройте города и заводы, держите оборону.

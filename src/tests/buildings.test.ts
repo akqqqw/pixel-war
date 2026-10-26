@@ -8,8 +8,9 @@ import {
   buildingsOfTab,
 } from '@/core/buildings/buildings';
 import { build, buildBlocker, demolishBuilding, upgradeBuilding } from '@/core/sim/actions';
-import { countBuildings, regionArmy } from '@/core/sim/effects';
+import { countBuildings, recomputeFortification, regionArmy } from '@/core/sim/effects';
 import { mobilize, mobilizeMax } from '@/core/sim/army';
+import { BALANCE } from '@/core/sim/balance';
 import { isCoastalCell } from '@/core/world/cells';
 import { createGame } from '@/core/state/createGame';
 
@@ -120,6 +121,30 @@ describe('buildings', () => {
     }
     expect(build(state, country.id, region.id, 'factory', freeCell(state, region.id)).ok).toBe(false);
     expect(countBuildings(region, 'factory')).toBe(BUILDINGS.factory.limit);
+  });
+
+  it('stacks AA interception and barricade defence within the caps', () => {
+    const { state, region, country, territory } = setup();
+    const ownCells = territory.tiles.filter((cell) => (state.cellOwner[cell] ?? -1) === state.countryOrder.indexOf(country.id));
+    const first = ownCells.find((cell) => !region.buildings.some((b) => b.cell === cell))!;
+    expect(build(state, country.id, region.id, 'aa', first).ok).toBe(true);
+    const second = ownCells.find(
+      (cell) => cell !== first && !region.buildings.some((b) => b.cell === cell),
+    )!;
+    if (build(state, country.id, region.id, 'aa', second).ok) {
+      recomputeFortification(state);
+      const combined = state.cellAir[first] ?? 0;
+      expect(combined).toBeGreaterThan(0.7);
+      expect(combined).toBeLessThanOrEqual(BALANCE.maxInterceptChance);
+    }
+
+    const barricadeCells = ownCells.filter((cell) => !region.buildings.some((b) => b.cell === cell)).slice(0, 2);
+    for (const cell of barricadeCells) build(state, country.id, region.id, 'barricade', cell);
+    recomputeFortification(state);
+    for (const cell of barricadeCells) {
+      expect(state.cellFort[cell] ?? 0).toBeGreaterThan(0);
+      expect(state.cellFort[cell] ?? 0).toBeLessThanOrEqual(BALANCE.maxFortDefense);
+    }
   });
 
   it('mobilises people into soldiers for gold, no more than the region allows', () => {

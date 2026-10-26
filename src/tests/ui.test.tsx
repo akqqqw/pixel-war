@@ -64,7 +64,8 @@ afterEach(() => {
 describe('interface', () => {
   it('opens the new campaign flow from the main menu', () => {
     render(<App />);
-    expect(container.textContent).toContain('МИРОВОЕ');
+    expect(container.textContent).toContain('PIXEL');
+    expect(container.textContent).toContain('WORLD WAR');
     act(() => {
       buttonByText('Новая игра').click();
     });
